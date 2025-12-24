@@ -1,0 +1,42 @@
+{
+  "name": "siyuan-plugin-lock",
+  "author": "495684945",
+  "url": "",
+  "version": "0.1.0",
+  "minAppVersion": "2.9.0",
+  "backends": [
+    "all"
+  ],
+  "frontends": [
+    "all"
+  ],
+  "displayName": {
+    "default": "SiYuan Lock",
+    "zh_CN": "隐私保护"
+  },
+  "description": {
+    "default": "Lock notebooks and docs with password or gesture, plus idle auto-lock.",
+    "zh_CN": "支持文档/笔记本加锁（密码/手势）与无操作自动锁屏。"
+  },
+  "readme": {
+    "default": "README.md",
+    "zh_CN": "README_zh_CN.md"
+  },
+  "funding": {
+    "openCollective": "",
+    "patreon": "",
+    "github": "",
+    "custom": [
+      "https://cos.jie86.cn/LightPicture/2025/03/518c36908c50c51d.jpg"
+    ]
+  },
+  "keywords": [
+    "lock",
+    "password",
+    "gesture",
+    "security",
+    "加锁",
+    "手势",
+    "锁屏"
+  ]
+}
