@@ -3,7 +3,7 @@
 Protect notebooks and documents with UI locks (password or gesture). Supports trust-time unlock, idle auto-lock, and clear lock indicators in the doc tree.
 
 ## Features
-- Lock notebooks and documents with password or 3x3 pattern (min 4 chars/dots).
+- Lock notebooks and documents with password or 3x3 pattern .
 - Two lock policies:
   - Always lock on restart (unlock once per session).
   - Trust time: stay unlocked for N minutes, then auto re-lock.
@@ -41,7 +41,7 @@ Protect notebooks and documents with UI locks (password or gesture). Supports tr
 - Desktop and mobile are both supported.
 
 ## Changelog
-- See [CHANGELOG.md](CHANGELOG.md).
+- See [CHANGELOG.md](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/CHANGELOG.md).
 
 ## License
 - MIT.

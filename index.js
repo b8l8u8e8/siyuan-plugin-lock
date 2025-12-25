@@ -20,8 +20,6 @@ try {
 const STORAGE_LOCKS = "locks";
 const STORAGE_SETTINGS = "settings";
 const LOCK_ICON_ID = "iconUiLockGuard";
-const MIN_PASSWORD_LEN = 4;
-const MIN_PATTERN_LEN = 4;
 const DEFAULT_SETTINGS = {
   autoLockEnabled: false,
   autoLockMinutes: 10,
@@ -377,7 +375,8 @@ function resolveDetailId(detail) {
 }
 
 function createPatternPad(container, options) {
-  const {mode, minLen, onComplete, onStatus} = options;
+  const {mode, minLen = 0, onComplete, onStatus} = options || {};
+  const minRequired = Number.isFinite(minLen) && minLen > 0 ? minLen : 0;
   const dots = Array.from(container.querySelectorAll(".ui-lock-guard__pattern-dot"));
   const svg = container.querySelector(".ui-lock-guard__pattern-line");
   let path = svg?.querySelector("path");
@@ -392,6 +391,7 @@ function createPatternPad(container, options) {
   }
 
   let active = false;
+  let pointerId = null;
   let firstPattern = "";
   let confirmed = false;
   let selection = [];
@@ -400,7 +400,7 @@ function createPatternPad(container, options) {
     if (typeof onStatus === "function") onStatus(msg);
   };
 
-  const reset = () => {
+  const resetVisuals = () => {
     selection = [];
     dots.forEach((dot) => dot.classList.remove("is-active"));
     if (path) path.setAttribute("d", "");
@@ -450,12 +450,24 @@ function createPatternPad(container, options) {
     dot.classList.add("is-active");
   };
 
+  const releasePointer = () => {
+    if (pointerId === null) return;
+    container.releasePointerCapture?.(pointerId);
+    pointerId = null;
+  };
+
+  const resetStroke = () => {
+    active = false;
+    releasePointer();
+    resetVisuals();
+  };
+
   const finalize = () => {
     if (!selection.length) return;
     const pattern = selection.map((dot) => dot.getAttribute("data-index")).join("-");
-    if (selection.length < minLen) {
+    if (minRequired > 0 && selection.length < minRequired) {
       setStatus("pattern-too-short");
-      reset();
+      resetStroke();
       return;
     }
     if (mode === "set") {
@@ -463,32 +475,40 @@ function createPatternPad(container, options) {
       if (!firstPattern) {
         firstPattern = pattern;
         setStatus("draw-again");
-        reset();
+        resetStroke();
         return;
       }
       if (firstPattern !== pattern) {
         setStatus("pattern-mismatch");
         firstPattern = "";
-        reset();
+        resetStroke();
         return;
       }
       confirmed = true;
       setStatus("pattern-confirmed");
       if (typeof onComplete === "function") onComplete(pattern);
-      reset();
+      resetStroke();
       return;
     }
     if (mode === "verify") {
       if (typeof onComplete === "function") onComplete(pattern);
-      reset();
+      resetStroke();
     }
   };
 
   const onPointerDown = (event) => {
     if (confirmed && mode === "set") return;
+    if (event.cancelable) event.preventDefault();
+    if (active || pointerId !== null) {
+      resetStroke();
+    }
     active = true;
-    container.setPointerCapture?.(event.pointerId);
-    reset();
+    pointerId = event.pointerId;
+    container.setPointerCapture?.(pointerId);
+    resetVisuals();
+    if (mode === "set") {
+      setStatus(firstPattern ? "draw-again" : "");
+    }
     const dot = findDotAt(event.clientX, event.clientY);
     if (dot) addDot(dot);
     buildPath();
@@ -496,6 +516,8 @@ function createPatternPad(container, options) {
 
   const onPointerMove = (event) => {
     if (!active) return;
+    if (pointerId !== null && event.pointerId !== pointerId) return;
+    if (event.cancelable) event.preventDefault();
     const dot = findDotAt(event.clientX, event.clientY);
     if (dot) addDot(dot);
     const rect = getRect();
@@ -508,22 +530,36 @@ function createPatternPad(container, options) {
 
   const onPointerUp = (event) => {
     if (!active) return;
+    if (pointerId !== null && event.pointerId !== pointerId) return;
     active = false;
-    container.releasePointerCapture?.(event.pointerId);
+    releasePointer();
     buildPath();
     finalize();
+  };
+
+  const onPointerCancel = (event) => {
+    if (!active) return;
+    if (pointerId !== null && event.pointerId !== pointerId) return;
+    resetStroke();
+    buildPath();
   };
 
   container.addEventListener("pointerdown", onPointerDown);
   container.addEventListener("pointermove", onPointerMove);
   container.addEventListener("pointerup", onPointerUp);
-  container.addEventListener("pointercancel", onPointerUp);
+  container.addEventListener("pointercancel", onPointerCancel);
+  container.addEventListener("lostpointercapture", onPointerCancel);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerCancel);
 
   return () => {
     container.removeEventListener("pointerdown", onPointerDown);
     container.removeEventListener("pointermove", onPointerMove);
     container.removeEventListener("pointerup", onPointerUp);
-    container.removeEventListener("pointercancel", onPointerUp);
+    container.removeEventListener("pointercancel", onPointerCancel);
+    container.removeEventListener("lostpointercapture", onPointerCancel);
+    window.removeEventListener("pointerup", onPointerUp);
+    window.removeEventListener("pointercancel", onPointerCancel);
   };
 }
 
@@ -612,6 +648,11 @@ class UiLockGuardPlugin extends Plugin {
     if (this.countdownFloating) {
       this.countdownFloating.remove();
     }
+  }
+
+  async uninstall() {
+    await this.removeData(STORAGE_LOCKS);
+    await this.removeData(STORAGE_SETTINGS);
   }
 
   async loadState() {
@@ -1430,7 +1471,7 @@ class UiLockGuardPlugin extends Plugin {
             <div class="ui-lock-guard__type-grid">
               <div class="ui-lock-guard__type-card" data-type="password">
                 <div class="ui-lock-guard__type-card-title">${this.t("lock.typePassword")}</div>
-                <div class="ui-lock-guard__hint">${this.t("lock.passwordHint", {min: MIN_PASSWORD_LEN})}</div>
+                <div class="ui-lock-guard__hint">${this.t("lock.passwordHint")}</div>
               </div>
               <div class="ui-lock-guard__type-card" data-type="pattern">
                 <div class="ui-lock-guard__type-card-title">${this.t("lock.typePattern")}</div>
@@ -1448,9 +1489,7 @@ class UiLockGuardPlugin extends Plugin {
               <input class="b3-text-field fn__block" type="password" data-password-confirm placeholder="${this.t(
                 "lock.confirmPassword",
               )}" />
-              <div class="ui-lock-guard__hint" data-password-hint>${this.t("lock.passwordHint", {
-                min: MIN_PASSWORD_LEN,
-              })}</div>
+              <div class="ui-lock-guard__hint" data-password-hint>${this.t("lock.passwordHint")}</div>
             </div>
             <div data-pattern-wrap style="display:none;">
               <div class="ui-lock-guard__pattern">
@@ -1589,7 +1628,6 @@ class UiLockGuardPlugin extends Plugin {
           if (this.patternCleanup) this.patternCleanup();
           this.patternCleanup = createPatternPad(patternWrap.querySelector(".ui-lock-guard__pattern"), {
             mode: "set",
-            minLen: MIN_PATTERN_LEN,
             onComplete: (pattern) => {
               state.secret = pattern;
               updateSteps();
@@ -1604,8 +1642,8 @@ class UiLockGuardPlugin extends Plugin {
         if (state.lockType === "password") {
           const pwd = String(passwordInput?.value || "");
           const confirm = String(passwordConfirm?.value || "");
-          if (pwd.length < MIN_PASSWORD_LEN) {
-            showMessage(this.t("lock.passwordTooShort"));
+          if (!pwd) {
+            showMessage(this.t("lock.secretRequired"));
             return;
           }
           if (pwd !== confirm) {
@@ -1615,7 +1653,7 @@ class UiLockGuardPlugin extends Plugin {
           state.secret = pwd;
         }
         if (!state.secret) {
-          showMessage(this.t("lock.patternTooShort"));
+          showMessage(this.t("lock.secretRequired"));
           return;
         }
         state.step = 3;
@@ -1627,7 +1665,7 @@ class UiLockGuardPlugin extends Plugin {
       const trustVal = clampInt(trustMinutesInput?.value, 1, 1440, 30);
       state.trustMinutes = trustVal;
       if (!state.lockType || !state.secret) {
-        showMessage(this.t("lock.patternTooShort"));
+        showMessage(this.t("lock.secretRequired"));
         return;
       }
       const policy = state.policy;
@@ -1760,13 +1798,6 @@ class UiLockGuardPlugin extends Plugin {
         if (cleanupPattern) cleanupPattern();
         cleanupPattern = createPatternPad(patternWrap.querySelector(".ui-lock-guard__pattern"), {
           mode: "verify",
-          minLen: MIN_PATTERN_LEN,
-          onStatus: (code) => {
-            if (code === "pattern-too-short") {
-              showMessage(this.t("unlock.fail"));
-              dialog.destroy();
-            }
-          },
           onComplete: async (pattern) => {
             secret = pattern;
             if (statusEl) statusEl.textContent = this.t("unlock.verify");
