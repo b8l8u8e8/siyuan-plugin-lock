@@ -1,6 +1,25 @@
 # SiYuan Lock (Privacy Guard)
 
 Protect notebooks and documents with UI locks (password or gesture). Supports trust-time unlock, idle auto-lock, and clear lock indicators in the doc tree.
+## Feature Preview
+
+### Plugin Settings Interface
+<img width="1419" height="775" alt="image" src="https://github.com/user-attachments/assets/082a458b-911b-4af8-a4de-21b0e27069ad" />
+
+### Add a Gesture Lock to a Notebook
+![GIF](https://github.com/user-attachments/assets/ea2afc8f-90ab-435c-93ad-25f670734abb)
+
+### Unlock a Notebook Gesture Lock
+![GIF](https://github.com/user-attachments/assets/ef890e6d-7bb4-426a-95e6-519b64f5f2da)
+
+### Add a Password Lock to a Document
+![GIF](https://github.com/user-attachments/assets/3e5b01d2-05a7-482e-ae65-9068c7159659)
+
+### Unlock a Document Password Lock
+![GIF](https://github.com/user-attachments/assets/b8116ef5-06a5-4e5c-9edd-572fc7bcb81d)
+
+### Automatic Screen Lock
+![GIF](https://github.com/user-attachments/assets/47012e8a-5dcb-4c95-bfca-47aa699ff069)
 
 ## Features
 - Lock notebooks and documents with password or 3x3 pattern .
