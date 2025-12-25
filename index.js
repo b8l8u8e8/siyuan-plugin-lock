@@ -33,86 +33,6 @@ const DEFAULT_SETTINGS = {
 };
 const TOUCH_LISTENER_OPTIONS = {capture: true, passive: false};
 
-const EN_I18N = {
-  "menu.lock": "Lock",
-  "menu.unlock": "Unlock",
-  "menu.removeLock": "Remove Lock",
-  "overlay.lockedTitle": "Locked",
-  "overlay.docLocked": "This note is locked",
-  "overlay.notebookLocked": "This notebook is locked",
-  "overlay.unlockAction": "Unlock",
-  "lock.dialogTitle": "Lock {{name}}",
-  "lock.chooseType": "Choose lock type",
-  "lock.typePassword": "Password",
-  "lock.typePattern": "Pattern",
-  "lock.stepNext": "Next",
-  "lock.stepBack": "Back",
-  "lock.stepSave": "Save",
-  "lock.stepCancel": "Cancel",
-  "lock.setPassword": "Set password",
-  "lock.confirmPassword": "Confirm password",
-  "lock.passwordHint": "At least {{min}} characters",
-  "lock.drawPattern": "Draw pattern",
-  "lock.drawAgain": "Draw again to confirm",
-  "lock.patternConfirmed": "Pattern confirmed",
-  "lock.patternTooShort": "Pattern is too short",
-  "lock.patternMismatch": "Patterns do not match",
-  "lock.passwordTooShort": "Password is too short",
-  "lock.passwordMismatch": "Passwords do not match",
-  "lock.choosePolicy": "Lock policy",
-  "lock.policyAlways": "Always lock on restart",
-  "lock.policyTrust": "Trust time",
-  "lock.trustMinutesLabel": "Trust minutes",
-  "lock.trustMinutesHint": "Keep unlocked for {{min}} minutes",
-  "lock.lockedSuccess": "Locked",
-  "unlock.dialogTitle": "Unlock {{name}}",
-  "unlock.enterPassword": "Enter password",
-  "unlock.drawPattern": "Draw pattern",
-  "unlock.verify": "Verify",
-  "unlock.success": "Unlocked",
-  "unlock.fail": "Verification failed",
-  "unlock.alreadyUnlocked": "Already unlocked",
-  "remove.dialogTitle": "Remove lock {{name}}",
-  "remove.verifyHint": "Verify to remove lock",
-  "remove.success": "Lock removed",
-  "settings.titleAutoLock": "Idle Auto Lock",
-  "settings.enableAutoLock": "Enable idle auto lock",
-  "settings.autoLockMinutes": "Idle time (minutes)",
-  "settings.showCountdown": "Show countdown",
-  "settings.countdownPosition": "Countdown position",
-  "settings.positionTopbar": "Top bar",
-  "settings.positionFloating": "Floating bubble",
-  "settings.showTreeCountdown": "Show trust countdown in tree",
-  "settings.treeCountdownHint": "Display remaining time next to lock icon",
-  "settings.lockListTitle": "Locked Items",
-  "settings.type": "Type",
-  "settings.lockType": "Lock type",
-  "settings.policy": "Policy",
-  "settings.trustUntil": "Trust until",
-  "settings.actions": "Actions",
-  "settings.doc": "Doc",
-  "settings.notebook": "Notebook",
-  "settings.policyAlways": "Always",
-  "settings.policyTrust": "Trust",
-  "settings.lockTypePassword": "Password",
-  "settings.lockTypePattern": "Pattern",
-  "settings.trustRemaining": "Remaining",
-  "settings.trustExpired": "Expired",
-  "settings.sessionUnlocked": "Session unlocked",
-  "settings.locked": "Locked",
-  "settings.unlock": "Unlock",
-  "settings.removeLock": "Remove lock",
-  "settings.trustMinutes": "{{min}} min",
-  "settings.trustUntilTime": "{{time}}",
-  "settings.emptyLocks": "No locked items",
-  "tree.trustCountdown": "Lock in {{min}}m {{sec}}s",
-  "autoLock.countdownTitle": "Auto Lock",
-  "autoLock.triggered": "Auto lock triggered",
-  "autoLock.actionFailed": "Failed to trigger app lock",
-  "notice.notebookLocked": "Unlock to expand this notebook",
-  "misc.unknown": "Unknown",
-};
-
 const LOCK_ICON_SVG = `<symbol id="${LOCK_ICON_ID}" viewBox="0 0 24 24">
   <path fill="currentColor" d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5Zm-3 8V7a3 3 0 1 1 6 0v3H9Z"/>
 </symbol>`;
@@ -643,7 +563,7 @@ class UiLockGuardPlugin extends Plugin {
   }
 
   t(key, params = {}) {
-    const raw = (this.i18n && this.i18n[key]) || EN_I18N[key] || key;
+    const raw = (this.i18n && this.i18n[key]) || key;
     return raw.replace(/\{\{(\w+)\}\}/g, (m, name) => {
       if (Object.prototype.hasOwnProperty.call(params, name)) return String(params[name]);
       return "";
