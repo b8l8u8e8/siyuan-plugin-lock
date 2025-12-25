@@ -15,12 +15,12 @@ Protect notebooks and documents with UI locks (password or gesture). Supports tr
   - Document can open, but content area is covered by a lock overlay.
   - Unlock to view the content.
 - Doc tree indicators:
-  - Lock icon shown for locked items.
-  - Trust-time locks show a live countdown to re-lock (toggle in settings).
+  - Lock icon shown for locked items; unlock icon shown after unlock to indicate it was previously locked.
+  - Trust-time locks show a live countdown only while trust is active (toggle in settings).
 - Idle auto-lock:
   - After X minutes of no activity, triggers SiYuan's lock screen/logout.
   - Optional countdown display (top bar or floating bubble).
-  - Floating bubble is draggable and position is saved.
+  - Floating bubble is draggable; position is saved per device by ratio to adapt to different layouts.
 - Settings panel:
   - List all locks with type, lock type, policy, trust expiry/remaining.
   - Unlock or remove locks in one place.

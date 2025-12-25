@@ -20,6 +20,7 @@ try {
 const STORAGE_LOCKS = "locks";
 const STORAGE_SETTINGS = "settings";
 const LOCK_ICON_ID = "iconUiLockGuard";
+const UNLOCK_ICON_ID = "iconUiLockGuardUnlock";
 const DEFAULT_SETTINGS = {
   autoLockEnabled: false,
   autoLockMinutes: 10,
@@ -27,12 +28,18 @@ const DEFAULT_SETTINGS = {
   autoLockPosition: "topbar",
   autoLockFloatX: null,
   autoLockFloatY: null,
+  autoLockFloatXMobile: null,
+  autoLockFloatYMobile: null,
+  autoLockFloatByDevice: null,
   treeCountdownEnabled: true,
 };
 const TOUCH_LISTENER_OPTIONS = {capture: true, passive: false};
 
 const LOCK_ICON_SVG = `<symbol id="${LOCK_ICON_ID}" viewBox="0 0 24 24">
   <path fill="currentColor" d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5Zm-3 8V7a3 3 0 1 1 6 0v3H9Z"/>
+</symbol>`;
+const UNLOCK_ICON_SVG = `<symbol id="${UNLOCK_ICON_ID}" viewBox="0 0 24 24">
+  <path fill="currentColor" d="M18 8h-1V6a4 4 0 0 0-8 0h2a2 2 0 1 1 4 0v2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm0 10H6v-8h12v8Z"/>
 </symbol>`;
 
 function nowTs() {
@@ -63,6 +70,73 @@ function clampInt(input, min, max, fallback) {
     return val;
   }
   return fallback;
+}
+
+function clampRatio(input) {
+  const val = Number.parseFloat(input);
+  if (!Number.isFinite(val)) return null;
+  return Math.max(0, Math.min(1, val));
+}
+
+function normalizeDeviceKey(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function getDeviceKey() {
+  const cfg = globalThis?.siyuan?.config;
+  const candidates = [
+    cfg?.system?.id,
+    cfg?.system?.deviceId,
+    cfg?.system?.device,
+    cfg?.system?.name,
+  ];
+  let key = "";
+  for (const candidate of candidates) {
+    const normalized = normalizeDeviceKey(candidate);
+    if (normalized) {
+      key = normalized;
+      break;
+    }
+  }
+  if (!key) {
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+    const screenSize =
+      typeof screen !== "undefined" && screen.width && screen.height ? `${screen.width}x${screen.height}` : "";
+    const dpr = typeof window !== "undefined" && window.devicePixelRatio ? `dpr${window.devicePixelRatio}` : "";
+    const host = typeof location !== "undefined" ? location.host : "";
+    key = [host, ua, platform, screenSize, dpr].filter(Boolean).join("|") || "unknown";
+  }
+  const mode = isMobileClient() ? "mobile" : "desktop";
+  return `${mode}:${key}`;
+}
+
+function ensureDeviceFloatMap(settings) {
+  if (!settings || typeof settings !== "object") return {};
+  const map = settings.autoLockFloatByDevice;
+  if (!map || typeof map !== "object" || Array.isArray(map)) {
+    settings.autoLockFloatByDevice = {};
+  }
+  return settings.autoLockFloatByDevice;
+}
+
+function getFloatingBounds(width, height, margin = 8) {
+  const safeWidth = Number.isFinite(width) && width > 0 ? width : 120;
+  const safeHeight = Number.isFinite(height) && height > 0 ? height : 32;
+  const maxLeft = Math.max(margin, window.innerWidth - safeWidth - margin);
+  const maxTop = Math.max(margin, window.innerHeight - safeHeight - margin);
+  const minLeft = margin;
+  const minTop = margin;
+  const spanX = Math.max(0, maxLeft - minLeft);
+  const spanY = Math.max(0, maxTop - minTop);
+  return {minLeft, minTop, maxLeft, maxTop, spanX, spanY};
+}
+
+function ratioFromPosition(pos, min, span) {
+  if (!Number.isFinite(pos)) return null;
+  if (!Number.isFinite(span) || span <= 0) return 0;
+  return (pos - min) / span;
 }
 
 function escapeHtml(str) {
@@ -607,7 +681,7 @@ class UiLockGuardPlugin extends Plugin {
   }
 
   onload() {
-    this.addIcons(LOCK_ICON_SVG);
+    this.addIcons(LOCK_ICON_SVG + UNLOCK_ICON_SVG);
     this.initSettingPanel();
     this.bindDocTreeLater();
 
@@ -667,6 +741,18 @@ class UiLockGuardPlugin extends Plugin {
       autoLockPosition: settings.autoLockPosition === "floating" ? "floating" : "topbar",
       autoLockFloatX: Number.isFinite(settings.autoLockFloatX) ? settings.autoLockFloatX : DEFAULT_SETTINGS.autoLockFloatX,
       autoLockFloatY: Number.isFinite(settings.autoLockFloatY) ? settings.autoLockFloatY : DEFAULT_SETTINGS.autoLockFloatY,
+      autoLockFloatXMobile: Number.isFinite(settings.autoLockFloatXMobile)
+        ? settings.autoLockFloatXMobile
+        : DEFAULT_SETTINGS.autoLockFloatXMobile,
+      autoLockFloatYMobile: Number.isFinite(settings.autoLockFloatYMobile)
+        ? settings.autoLockFloatYMobile
+        : DEFAULT_SETTINGS.autoLockFloatYMobile,
+      autoLockFloatByDevice:
+        settings.autoLockFloatByDevice &&
+        typeof settings.autoLockFloatByDevice === "object" &&
+        !Array.isArray(settings.autoLockFloatByDevice)
+          ? settings.autoLockFloatByDevice
+          : {},
       treeCountdownEnabled:
         typeof settings.treeCountdownEnabled === "boolean"
           ? settings.treeCountdownEnabled
@@ -904,6 +990,7 @@ class UiLockGuardPlugin extends Plugin {
   clearDocTreeMarks() {
     const clearScope = (scope) => {
       scope.querySelectorAll(".ui-lock-guard__tree-lock").forEach((el) => el.remove());
+      scope.querySelectorAll(".ui-lock-guard__tree-countdown").forEach((el) => el.remove());
       scope.querySelectorAll(".ui-lock-guard__tree-item--locked").forEach((el) => {
         el.classList.remove("ui-lock-guard__tree-item--locked");
       });
@@ -939,6 +1026,7 @@ class UiLockGuardPlugin extends Plugin {
         const notebookMatch = info.isNotebook ? this.resolveNotebookLockForTreeItem(item) : null;
         const activeLock = docLock || notebookMatch?.lock || null;
         const hasLock = Boolean(activeLock);
+        const isLocked = activeLock ? this.isLockedNow(activeLock) : false;
         const titleEl =
           item.querySelector(".b3-list-item__text") ||
           item.querySelector(".b3-list-item__title") ||
@@ -947,20 +1035,28 @@ class UiLockGuardPlugin extends Plugin {
           item.querySelector(".b3-list-item__content") ||
           item;
         if (hasLock) {
-          item.classList.add("ui-lock-guard__tree-item--locked");
+          if (isLocked) item.classList.add("ui-lock-guard__tree-item--locked");
+          else item.classList.remove("ui-lock-guard__tree-item--locked");
           let icon = titleEl.querySelector(".ui-lock-guard__tree-lock");
           if (!icon) {
             icon = document.createElement("span");
             icon.className = "ui-lock-guard__tree-lock";
-            icon.setAttribute("data-ui-lock-guard", "lock");
-            icon.innerHTML = `<svg><use xlink:href="#${LOCK_ICON_ID}"></use></svg>`;
             titleEl.appendChild(icon);
           }
+          const iconState = isLocked ? "lock" : "unlock";
+          if (icon.getAttribute("data-ui-lock-guard") !== iconState) {
+            const iconId = isLocked ? LOCK_ICON_ID : UNLOCK_ICON_ID;
+            icon.setAttribute("data-ui-lock-guard", iconState);
+            icon.innerHTML = `<svg><use xlink:href="#${iconId}"></use></svg>`;
+          }
           const countdown = titleEl.querySelector(".ui-lock-guard__tree-countdown");
-          if (activeLock && activeLock.policy === "trust" && this.settings.treeCountdownEnabled) {
+          const text =
+            activeLock && activeLock.policy === "trust" && this.settings.treeCountdownEnabled
+              ? this.formatTreeTrustCountdown(activeLock, now)
+              : "";
+          if (text) {
             hasTrustLock = true;
             const lockKey = makeLockKey(activeLock.type, activeLock.id);
-            const text = this.formatTreeTrustCountdown(activeLock, now);
             if (countdown) {
               countdown.setAttribute("data-lock-key", lockKey);
               if (countdown.textContent !== text) {
@@ -2008,7 +2104,8 @@ class UiLockGuardPlugin extends Plugin {
 
   formatTreeTrustCountdown(lock, now = nowTs()) {
     if (!lock || lock.policy !== "trust") return "";
-    const remaining = lock.trustUntil && lock.trustUntil > now ? lock.trustUntil - now : 0;
+    if (!lock.trustUntil || lock.trustUntil <= now) return "";
+    const remaining = lock.trustUntil - now;
     const parts = getCountdownParts(remaining);
     const min = String(parts.minutes);
     const sec = String(parts.seconds).padStart(2, "0");
@@ -2035,9 +2132,11 @@ class UiLockGuardPlugin extends Plugin {
         return;
       }
       const text = this.formatTreeTrustCountdown(lock, now);
-      if (node.textContent !== text) {
-        node.textContent = text;
+      if (!text) {
+        node.remove();
+        return;
       }
+      if (node.textContent !== text) node.textContent = text;
     });
   }
 
@@ -2297,21 +2396,37 @@ class UiLockGuardPlugin extends Plugin {
     const el = this.countdownFloating;
     if (!el) return;
     const margin = 8;
-    const width = el.offsetWidth || 120;
-    const height = el.offsetHeight || 32;
-    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
-    const maxTop = Math.max(margin, window.innerHeight - height - margin);
-    let left = this.settings.autoLockFloatX;
-    let top = this.settings.autoLockFloatY;
-    if (typeof left !== "number" || typeof top !== "number") {
+    const bounds = getFloatingBounds(el.offsetWidth, el.offsetHeight, margin);
+    const map = ensureDeviceFloatMap(this.settings);
+    const deviceKey = getDeviceKey();
+    const entry = map[deviceKey] || {};
+    let ratioX = clampRatio(entry.x);
+    let ratioY = clampRatio(entry.y);
+    let migrated = false;
+
+    if (Number.isFinite(entry.x) && entry.x > 1) {
+      ratioX = clampRatio(ratioFromPosition(entry.x, bounds.minLeft, bounds.spanX));
+      migrated = true;
+    }
+    if (Number.isFinite(entry.y) && entry.y > 1) {
+      ratioY = clampRatio(ratioFromPosition(entry.y, bounds.minTop, bounds.spanY));
+      migrated = true;
+    }
+
+    if (migrated) {
+      map[deviceKey] = {x: ratioX, y: ratioY};
+      void this.saveSettings();
+    }
+
+    if (typeof ratioX !== "number" || typeof ratioY !== "number") {
       el.style.right = "24px";
       el.style.bottom = "24px";
       el.style.left = "auto";
       el.style.top = "auto";
       return;
     }
-    left = Math.min(Math.max(margin, left), maxLeft);
-    top = Math.min(Math.max(margin, top), maxTop);
+    const left = bounds.minLeft + bounds.spanX * ratioX;
+    const top = bounds.minTop + bounds.spanY * ratioY;
     el.style.left = `${Math.round(left)}px`;
     el.style.top = `${Math.round(top)}px`;
     el.style.right = "auto";
@@ -2325,23 +2440,21 @@ class UiLockGuardPlugin extends Plugin {
     el.addEventListener("pointerdown", (event) => {
       if (event.button && event.button !== 0) return;
       const rect = el.getBoundingClientRect();
+      const bounds = getFloatingBounds(rect.width, rect.height, 8);
       let baseLeft = rect.left;
       let baseTop = rect.top;
       let currentLeft = baseLeft;
       let currentTop = baseTop;
       const startX = event.clientX;
       const startY = event.clientY;
-      const margin = 8;
       el.setPointerCapture?.(event.pointerId);
       event.preventDefault();
 
       const onMove = (moveEvent) => {
         const dx = moveEvent.clientX - startX;
         const dy = moveEvent.clientY - startY;
-        const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
-        const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
-        currentLeft = Math.min(Math.max(margin, baseLeft + dx), maxLeft);
-        currentTop = Math.min(Math.max(margin, baseTop + dy), maxTop);
+        currentLeft = Math.min(Math.max(bounds.minLeft, baseLeft + dx), bounds.maxLeft);
+        currentTop = Math.min(Math.max(bounds.minTop, baseTop + dy), bounds.maxTop);
         el.style.left = `${Math.round(currentLeft)}px`;
         el.style.top = `${Math.round(currentTop)}px`;
         el.style.right = "auto";
@@ -2352,8 +2465,11 @@ class UiLockGuardPlugin extends Plugin {
         document.removeEventListener("pointermove", onMove, true);
         document.removeEventListener("pointerup", onUp, true);
         document.removeEventListener("pointercancel", onUp, true);
-        this.settings.autoLockFloatX = Math.round(currentLeft);
-        this.settings.autoLockFloatY = Math.round(currentTop);
+        const ratioX = clampRatio(ratioFromPosition(currentLeft, bounds.minLeft, bounds.spanX));
+        const ratioY = clampRatio(ratioFromPosition(currentTop, bounds.minTop, bounds.spanY));
+        const map = ensureDeviceFloatMap(this.settings);
+        const deviceKey = getDeviceKey();
+        map[deviceKey] = {x: ratioX, y: ratioY};
         void this.saveSettings();
       };
 
