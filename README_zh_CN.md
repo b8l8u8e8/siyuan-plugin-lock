@@ -1,6 +1,24 @@
 # 隐私保护（SiYuan Lock）
 
 为思源笔记的笔记本与文档提供 UI 级别的加锁，支持密码/手势、信任时长自动重锁，以及无操作自动锁屏。
+## 功能预览
+### 插件设置界面
+<img width="1419" height="775" alt="image" src="https://github.com/user-attachments/assets/082a458b-911b-4af8-a4de-21b0e27069ad" />
+
+### 为笔记本加手势锁
+![GIF](https://github.com/user-attachments/assets/ea2afc8f-90ab-435c-93ad-25f670734abb)
+
+### 解笔记本手势锁
+![GIF](https://github.com/user-attachments/assets/ef890e6d-7bb4-426a-95e6-519b64f5f2da)
+
+### 为文档加密码锁
+![GIF](https://github.com/user-attachments/assets/3e5b01d2-05a7-482e-ae65-9068c7159659)
+
+### 解文档密码锁
+![GIF](https://github.com/user-attachments/assets/b8116ef5-06a5-4e5c-9edd-572fc7bcb81d)
+
+### 自动锁屏
+![GIF](https://github.com/user-attachments/assets/47012e8a-5dcb-4c95-bfca-47aa699ff069)
 
 ## 功能一览
 - 文档/笔记本加锁：密码或 3x3 手势。
