@@ -1,66 +1,83 @@
-# SiYuan Lock (Privacy Guard)
+- # Privacy Protection (SiYuan Lock)
 
-Protect notebooks and documents with UI locks (password or gesture). Supports trust-time unlock, idle auto-lock, and clear lock indicators in the doc tree.
-## Feature Preview
+  Provides locking for notebooks and documents in SiYuan Notes, supporting password/gesture locks, auto-relocking based on trust duration, and automatic screen lock after inactivity.
 
-### Plugin Settings Interface
-<img width="1419" height="775" alt="image" src="https://github.com/user-attachments/assets/082a458b-911b-4af8-a4de-21b0e27069ad" />
+  [中文](README_zh_CN.md)|[English](README.md)
 
-### Add a Gesture Lock to a Notebook
-![GIF](https://github.com/user-attachments/assets/ea2afc8f-90ab-435c-93ad-25f670734abb)
+  ## Features
+  - Document/Notebook Lock: Password or 3x3 Gesture.
+  - Locking Policies:
+    - Restart Default Lock: After unlocking, it is only valid for the current session; the document will be locked again after restarting.
+    - Trust Duration: Keeps unlocked for N minutes after unlocking, automatically relocks when the time expires.
+  - Notebook Lock Behavior:
+    - Automatically folds in the document tree.
+    - Requires unlock verification to expand.
+    - Only applies to the notebook itself; documents within the notebook are not affected.
+  - Document Lock Behavior:
+    - The document can be opened, but the content area will be covered by a lock screen.
+    - Clicking the unlock button on the mask allows access to the content.
+  - Document Tree Marking:
+    - Locked items display a lock icon; after unlocking, an unlock icon is shown for easy differentiation of previously locked items.
+    - Trust duration lock shows a countdown only within the trust period (can be disabled in settings).
+  - Inactivity Auto Lock:
+    - Triggers SiYuan’s built-in lock/logout after X minutes of inactivity.
+    - Optional countdown display (top bar or floating ball).
+    - The floating ball is draggable, and its position is saved proportionally based on the device, adapting to different layouts.
+  - Settings Panel:
+    - Lists all locks (type, lock type, policy, expiration time/remaining time).
+    - Supports unlocking or removing locks directly from the settings.
+    - Configures automatic screen lock and countdown display position.
+    - Switch for "Document Tree Trust Countdown" display.
 
-### Unlock a Notebook Gesture Lock
-![GIF](https://github.com/user-attachments/assets/ef890e6d-7bb4-426a-95e6-519b64f5f2da)
+  ## Usage
+  - Desktop: Right-click a document/notebook in the document tree, and select Lock/Unlock/Remove Lock.
+  - Mobile: Click the three dots on the right side of the document/notebook to open the same menu.
+  - When opening a locked document, click the "Unlock" button on the mask for verification.
+  - Plugin settings allow you to manage all locks and automatic screen lock settings.
 
-### Add a Password Lock to a Document
-![GIF](https://github.com/user-attachments/assets/3e5b01d2-05a7-482e-ae65-9068c7159659)
+  ### Lock Notebook with Gesture
 
-### Unlock a Document Password Lock
-![GIF](https://github.com/user-attachments/assets/b8116ef5-06a5-4e5c-9edd-572fc7bcb81d)
+  ![GIF](https://github.com/user-attachments/assets/ea2afc8f-90ab-435c-93ad-25f670734abb)
 
-### Automatic Screen Lock
-![GIF](https://github.com/user-attachments/assets/47012e8a-5dcb-4c95-bfca-47aa699ff069)
+  ### Unlock Notebook Gesture
 
-## Features
-- Lock notebooks and documents with password or 3x3 pattern .
-- Two lock policies:
-  - Always lock on restart (unlock once per session).
-  - Trust time: stay unlocked for N minutes, then auto re-lock.
-- Notebook lock behavior:
-  - Auto-collapse in the doc tree.
-  - Requires unlock before expanding.
-  - Only affects the notebook itself; documents inside remain independent.
-- Document lock behavior:
-  - Document can open, but content area is covered by a lock overlay.
-  - Unlock to view the content.
-- Doc tree indicators:
-  - Lock icon shown for locked items; unlock icon shown after unlock to indicate it was previously locked.
-  - Trust-time locks show a live countdown only while trust is active (toggle in settings).
-- Idle auto-lock:
-  - After X minutes of no activity, triggers SiYuan's lock screen/logout.
-  - Optional countdown display (top bar or floating bubble).
-  - Floating bubble is draggable; position is saved per device by ratio to adapt to different layouts.
-- Settings panel:
-  - List all locks with type, lock type, policy, trust expiry/remaining.
-  - Unlock or remove locks in one place.
-  - Configure idle auto-lock and countdown position.
-  - Toggle trust-time countdown display in the doc tree.
+  ![GIF](https://github.com/user-attachments/assets/ef890e6d-7bb4-426a-95e6-519b64f5f2da)
 
-## Usage
-- Desktop: right-click a doc or notebook in the tree to Lock / Unlock / Remove.
-- Mobile: long-press a doc or notebook to open the same menu.
-- Use the overlay Unlock button when a locked document is open.
-- Open plugin settings to manage locks and auto-lock behavior.
+  ### Lock Document with Password
 
-## Notes
-- UI-only lock: no encryption, content is not modified.
-- Disabling or uninstalling the plugin removes all restrictions immediately.
+  ![GIF](https://github.com/user-attachments/assets/3e5b01d2-05a7-482e-ae65-9068c7159659)
 
-## Platforms
-- Desktop and mobile are both supported.
+  ### Unlock Document Password Lock
 
-## Changelog
-- See [CHANGELOG.md](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/CHANGELOG.md).
+  ![GIF](https://github.com/user-attachments/assets/b8116ef5-06a5-4e5c-9edd-572fc7bcb81d)
 
-## License
-- MIT.
+  ### Automatic Screen Lock
+
+  ![GIF](https://github.com/user-attachments/assets/47012e8a-5dcb-4c95-bfca-47aa699ff069)
+
+  ## Notes
+  ### Changelog
+
+  - See [CHANGELOG.md](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/CHANGELOG.md)
+
+  ### Issue Feedback
+
+  - If you encounter any issues, please [submit an issue](https://github.com/b8l8u8e8/siyuan-plugin-lock/issues)
+
+  ### Support the Author
+
+  If you think this project is useful, feel free to support it. This will encourage me to keep updating and building better tools~
+
+  #### Github Star
+
+  Give a [Github Star](https://github.com/b8l8u8e8/siyuan-plugin-lock) to support the author~
+
+  #### WeChat
+  ![WeChat](https://github.com/user-attachments/assets/81d0a064-b760-4e97-9c9b-bf83f6cafc8a)
+
+  #### Alipay
+  ![Alipay](https://github.com/user-attachments/assets/9e1988d0-4016-4b8d-9ea6-ce8ff714ee17)
+
+  ### License
+
+  - MIT

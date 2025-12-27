@@ -5,7 +5,12 @@
   display: none;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(180deg, rgba(250, 251, 252, 0.94), rgba(244, 246, 248, 0.98));
+  background-color: var(--b3-theme-background);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--b3-theme-background) 94%, transparent),
+    color-mix(in srgb, var(--b3-theme-surface) 98%, transparent)
+  );
   backdrop-filter: blur(2px);
 }
 
