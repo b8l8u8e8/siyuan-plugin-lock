@@ -68,3 +68,4 @@
 
 - **问题反馈**：[GitHub Issues](https://github.com/b8l8u8e8/siyuan-plugin-lock/issues)
 - **开源协议**：[MIT License](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/LICENSE)
+- **更新日志**: [CHANGELOG.md](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/CHANGELOG.md)
