@@ -42,7 +42,7 @@
 
 <div align="center">
     <a href="https://github.com/b8l8u8e8/siyuan-plugin-lock">
-        <img src="https://img.shields.io/github/stars/b8l8u8e8/siyuan-plugin-lock?style=for-the-badge&color=ffd700&label=给个Star吧" alt="Github Star">
+        <img src="https://img.shields.io/github/stars/b8l8u8e8/siyuan-plugin-lock?style=for-the-badge&color=ffd700&label=%E7%BB%99%E4%B8%AAStar%E5%90%A7" alt="Github Star">
     </a>
 </div>
 
