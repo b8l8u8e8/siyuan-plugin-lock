@@ -58,7 +58,7 @@
 ## 说明
 ### 更新日志
 
-- 详见 [CHANGELOG.md](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/CHANGELOG.md)。
+- 详见 [CHANGELOG.md](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/CHANGELOG.md)
 
 ### 问题反馈
 
@@ -80,4 +80,4 @@
 
 ### 许可证
 
-- MIT。
+- MIT
