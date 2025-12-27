@@ -1,26 +1,10 @@
 # 隐私保护（SiYuan Lock）
 
-为思源笔记的笔记本与文档提供 UI 级别的加锁，支持密码/手势、信任时长自动重锁，以及无操作自动锁屏。
-## 功能预览
-### 插件设置界面
-<img width="1419" height="775" alt="image" src="https://github.com/user-attachments/assets/082a458b-911b-4af8-a4de-21b0e27069ad" />
+为思源笔记的笔记本与文档提供加锁，支持密码/手势、信任时长自动重锁，以及无操作自动锁屏。
 
-### 为笔记本加手势锁
-![GIF](https://github.com/user-attachments/assets/ea2afc8f-90ab-435c-93ad-25f670734abb)
+[中文](README_zh_CN.md)|[English](README.md)
 
-### 解笔记本手势锁
-![GIF](https://github.com/user-attachments/assets/ef890e6d-7bb4-426a-95e6-519b64f5f2da)
-
-### 为文档加密码锁
-![GIF](https://github.com/user-attachments/assets/3e5b01d2-05a7-482e-ae65-9068c7159659)
-
-### 解文档密码锁
-![GIF](https://github.com/user-attachments/assets/b8116ef5-06a5-4e5c-9edd-572fc7bcb81d)
-
-### 自动锁屏
-![GIF](https://github.com/user-attachments/assets/47012e8a-5dcb-4c95-bfca-47aa699ff069)
-
-## 功能一览
+## 功能介绍
 - 文档/笔记本加锁：密码或 3x3 手势。
 - 锁定策略：
   - 重启默认锁：解锁后仅本次会话有效，重启后重新上锁。
@@ -47,19 +31,53 @@
 
 ## 使用方法
 - 桌面端：在文档树中右键文档/笔记本，选择加锁/解锁/移除锁。
-- 移动端：长按文档/笔记本打开同样的菜单。
+- 移动端：点击文档/笔记本右边的三点弹出同样的菜单。
 - 打开已锁文档时，点击遮罩中的“解锁”按钮进行验证。
 - 插件设置中可统一管理所有锁与自动锁屏设置。
 
+### 为笔记本加手势锁
+
+![GIF](https://github.com/user-attachments/assets/ea2afc8f-90ab-435c-93ad-25f670734abb)
+
+### 解笔记本手势锁
+
+![GIF](https://github.com/user-attachments/assets/ef890e6d-7bb4-426a-95e6-519b64f5f2da)
+
+### 为文档加密码锁
+
+![GIF](https://github.com/user-attachments/assets/3e5b01d2-05a7-482e-ae65-9068c7159659)
+
+### 解文档密码锁
+
+![GIF](https://github.com/user-attachments/assets/b8116ef5-06a5-4e5c-9edd-572fc7bcb81d)
+
+### 自动锁屏
+
+![GIF](https://github.com/user-attachments/assets/47012e8a-5dcb-4c95-bfca-47aa699ff069)
+
 ## 说明
-- 仅 UI 级别加锁，不对内容加密，不修改原始数据。
-- 禁用或卸载插件后，所有限制立即失效。
+### 更新日志
 
-## 平台
-- 适用于桌面端与移动端。
-
-## 更新日志
 - 详见 [CHANGELOG.md](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/CHANGELOG.md)。
 
-## 许可证
+### 问题反馈
+
+- 如果有问题，可以去提 [issue](https://github.com/b8l8u8e8/siyuan-plugin-lock/issues)
+
+### 支持作者
+
+如果您认为这个项目不错，欢迎支持，这将会鼓励我持续更新，打造更好的工具~
+
+#### Github Star
+
+给个[Github Star](https://github.com/b8l8u8e8/siyuan-plugin-lock)支持作者吧~
+
+#### 微信
+
+#### 支付宝
+
+
+
+### 许可证
+
 - MIT。
