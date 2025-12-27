@@ -73,10 +73,10 @@
 给个[Github Star](https://github.com/b8l8u8e8/siyuan-plugin-lock)支持作者吧~
 
 #### 微信
+![微信](https://github.com/user-attachments/assets/81d0a064-b760-4e97-9c9b-bf83f6cafc8a)
 
 #### 支付宝
-
-
+![支付宝](https://github.com/user-attachments/assets/9e1988d0-4016-4b8d-9ea6-ce8ff714ee17)
 
 ### 许可证
 
