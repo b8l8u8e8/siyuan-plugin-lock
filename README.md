@@ -1,4 +1,4 @@
-- * # 🔒 Privacy Protection (SiYuan Lock)
+# 🔒 Privacy Protection (SiYuan Lock)
 
     Provides locking mechanisms for SiYuan Note notebooks and documents. Supports password/gesture locks, auto-relock based on trusted duration, and auto-lock screen upon inactivity.
 
