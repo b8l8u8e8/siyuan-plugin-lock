@@ -7,9 +7,13 @@
 ## ✨ 功能介绍
 
 - **文档/笔记本加锁**：支持密码或 3x3 手势。
-- **锁定策略**：支持重启默认锁及自定义 N 分钟信任时长。
-- **笔记本锁行为**：文档树自动折叠，展开时需要解锁验证。
-- **文档锁行为**：内容区域会被锁屏遮罩覆盖，点击解锁按钮查看。
+- **锁定策略**：支持重启默认锁及自定义 N 分钟信任时长自动重锁。
+- **笔记本锁行为**：文档树自动折叠，展开需解锁；已锁文档显示锁标记与信任倒计时(倒计时设置可关闭)。
+- **文档锁行为**：打开文档时内容遮罩；若锁来源为笔记本(即文档未锁但上级笔记本加锁)，会提示具体笔记本名称。
+- **全局搜索保护**：全局搜索的匹配内容替换为锁定提示文案，只保留标题和文档路径；预览区加锁，防止通过搜索直接查看加锁的文档。
+- **全局搜索隐藏开关**：全局搜索工具栏眼睛按钮切换，显示或不显示加锁的文档搜索结果。
+- **文件历史保护**：文件历史预览区加锁，需解锁后才能查看历史内容，防止通过文件历史直接查看加锁的文档。
+- **锁管理面板**：插件设置页展示所有已加锁对象，可解锁或删除。
 - **无操作自动锁屏**：无操作 X 分钟后触发锁屏，支持悬浮球/顶部栏倒计时。
 
 ## 📖 功能演示
@@ -45,22 +49,26 @@
         <img src="https://img.shields.io/github/stars/b8l8u8e8/siyuan-plugin-lock?style=for-the-badge&color=ffd700&label=%E7%BB%99%E4%B8%AAStar%E5%90%A7" alt="Github Star">
     </a>
 </div>
-
-
-
-<div align="center">
-    <div style="display: flex; justify-content: center; align-items: flex-end; gap: 30px;">
+<div align="center" style="margin-top: 40px;">
+    <div style="display: flex; justify-content: center; align-items: center; gap: 30px;">
         <div style="text-align: center;">
-            <img src="https://github.com/user-attachments/assets/81d0a064-b760-4e97-9c9b-bf83f6cafc8a" height="280" style="border-radius: 10px; border: 2px solid #07c160; object-fit: contain;"><br/>
+            <img src="https://github.com/user-attachments/assets/81d0a064-b760-4e97-9c9b-bf83f6cafc8a" 
+                 style="height: 280px; width: auto; border-radius: 10px; border: 2px solid #07c160; object-fit: contain; display: inline-block;">
+            <br/>
             <b style="color: #07c160; display: block; margin-top: 10px;">微信支付</b>
         </div>
         <div style="text-align: center;">
-            <img src="https://github.com/user-attachments/assets/9e1988d0-4016-4b8d-9ea6-ce8ff714ee17" height="280" style="border-radius: 10px; border: 2px solid #1677ff; object-fit: contain;"><br/>
+            <img src="https://github.com/user-attachments/assets/9e1988d0-4016-4b8d-9ea6-ce8ff714ee17" 
+                 style="height: 280px; width: auto; border-radius: 10px; border: 2px solid #1677ff; object-fit: contain; display: inline-block;">
+            <br/>
             <b style="color: #1677ff; display: block; margin-top: 10px;">支付宝</b>
         </div>
     </div>
     <p style="margin-top: 20px;"><i>您的支持是我不断迭代的动力</i></p>
 </div>
+
+
+
 
 ---
 

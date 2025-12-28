@@ -5,6 +5,7 @@
   "overlay.lockedTitle": "Locked",
   "overlay.docLocked": "This note is locked",
   "overlay.notebookLocked": "This notebook is locked",
+  "overlay.notebookLockedWithName": "Locked notebook: {{name}}",
   "overlay.unlockAction": "Unlock",
   "lock.dialogTitle": "Lock {{name}}",
   "lock.chooseType": "Choose lock type",
@@ -38,6 +39,7 @@
   "unlock.success": "Unlocked",
   "unlock.fail": "Verification failed",
   "unlock.alreadyUnlocked": "Already unlocked",
+  "unlock.hintNotebook": "This doc belongs to locked notebook: {{name}}",
   "remove.dialogTitle": "Remove lock {{name}}",
   "remove.verifyHint": "Verify to remove lock",
   "remove.success": "Lock removed",
@@ -75,6 +77,11 @@
   "autoLock.countdownTitle": "Auto Lock",
   "autoLock.triggered": "Auto lock triggered",
   "autoLock.actionFailed": "Failed to trigger app lock",
+  "search.toggleHideLocked": "Hide locked results",
+  "search.toggleShowLocked": "Show locked results",
+  "search.hiddenCount": "Hidden {{count}}",
+  "search.hiddenEmpty": "No locked results",
+  "search.lockedSnippet": "Locked content. Unlock to view.",
   "notice.notebookLocked": "Unlock to expand this notebook",
   "misc.unknown": "Unknown"
 }

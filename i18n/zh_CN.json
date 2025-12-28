@@ -5,6 +5,7 @@
   "overlay.lockedTitle": "已锁定",
   "overlay.docLocked": "该文档已加锁",
   "overlay.notebookLocked": "该笔记本已加锁",
+  "overlay.notebookLockedWithName": "所属笔记本已加锁：{{name}}",
   "overlay.unlockAction": "解锁",
   "lock.dialogTitle": "加锁 {{name}}",
   "lock.chooseType": "选择锁类型",
@@ -38,6 +39,7 @@
   "unlock.success": "解锁成功",
   "unlock.fail": "验证失败",
   "unlock.alreadyUnlocked": "已处于解锁状态",
+  "unlock.hintNotebook": "此文档隶属于已加锁的笔记本：{{name}}",
   "remove.dialogTitle": "删除锁 {{name}}",
   "remove.verifyHint": "验证后删除锁",
   "remove.success": "已删除锁",
@@ -75,6 +77,11 @@
   "autoLock.countdownTitle": "自动锁屏",
   "autoLock.triggered": "已触发自动锁屏",
   "autoLock.actionFailed": "触发锁屏失败",
+  "search.toggleHideLocked": "隐藏已加锁结果",
+  "search.toggleShowLocked": "显示已加锁结果",
+  "search.hiddenCount": "已隐藏 {{count}} 条",
+  "search.hiddenEmpty": "没有可隐藏的已加锁结果",
+  "search.lockedSnippet": "内容已锁定，解锁后查看",
   "notice.notebookLocked": "请解锁后展开该笔记本",
   "misc.unknown": "未知"
 }

@@ -45,6 +45,15 @@
   color: var(--b3-theme-on-surface-light);
 }
 
+.ui-lock-guard__search-masked {
+  color: var(--b3-theme-on-surface-light);
+  font-style: italic;
+}
+
+.ui-lock-guard__search-hidden {
+  display: none !important;
+}
+
 .ui-lock-guard__overlay-actions {
   margin-top: 18px;
   display: flex;

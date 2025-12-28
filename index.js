@@ -21,6 +21,9 @@ const STORAGE_LOCKS = "locks";
 const STORAGE_SETTINGS = "settings";
 const LOCK_ICON_ID = "iconUiLockGuard";
 const UNLOCK_ICON_ID = "iconUiLockGuardUnlock";
+const SEARCH_SHOW_ICON_ID = "iconUiLockGuardEyeOpen";
+const SEARCH_HIDE_ICON_ID = "iconUiLockGuardEyeClosed";
+const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_SETTINGS = {
   autoLockEnabled: false,
   autoLockMinutes: 10,
@@ -34,12 +37,19 @@ const DEFAULT_SETTINGS = {
   treeCountdownEnabled: true,
 };
 const TOUCH_LISTENER_OPTIONS = {capture: true, passive: false};
+const DOC_SOURCE_TTL = 2500;
 
 const LOCK_ICON_SVG = `<symbol id="${LOCK_ICON_ID}" viewBox="0 0 24 24">
   <path fill="currentColor" d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5Zm-3 8V7a3 3 0 1 1 6 0v3H9Z"/>
 </symbol>`;
 const UNLOCK_ICON_SVG = `<symbol id="${UNLOCK_ICON_ID}" viewBox="0 0 24 24">
   <path fill="currentColor" d="M18 8h-1V6a4 4 0 0 0-8 0h2a2 2 0 1 1 4 0v2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm0 10H6v-8h12v8Z"/>
+</symbol>`;
+const SEARCH_SHOW_ICON_SVG = `<symbol id="${SEARCH_SHOW_ICON_ID}" viewBox="0 0 24 24">
+  <path fill="currentColor" d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"/>
+</symbol>`;
+const SEARCH_HIDE_ICON_SVG = `<symbol id="${SEARCH_HIDE_ICON_ID}" viewBox="0 0 24 24">
+  <path fill="currentColor" d="M2.4 3.8 3.8 2.4 21.6 20.2 20.2 21.6l-3.1-3.1A11.7 11.7 0 0 1 12 19c-7 0-10-7-10-7a17.6 17.6 0 0 1 4.6-5.4L2.4 3.8Zm5.8 5.8a4 4 0 0 0 5.6 5.6L8.2 9.6ZM12 5a11.2 11.2 0 0 1 6.7 2.2l-2.1 2.1A4 4 0 0 0 10 10L7.9 7.9A11.8 11.8 0 0 1 12 5Zm8.9 5a17.6 17.6 0 0 1 1.1 2s-1.2 2.9-3.9 5.1l-2.2-2.2A6 6 0 0 0 18 12a6 6 0 0 0-.2-1.5l3.1-3.1Z"/>
 </symbol>`;
 
 function nowTs() {
@@ -251,6 +261,322 @@ async function hashSecret(secret, saltBase64) {
 
 function makeLockKey(type, id) {
   return `${type}:${id}`;
+}
+
+function extractDocIdFromPath(path) {
+  if (!path) return "";
+  const match = String(path).match(/(?:^|[\\/])(\d{14}-[a-z0-9]{7})\.(?:syx|sy)$/i);
+  return match ? match[1] : "";
+}
+
+function isHistoryPath(path) {
+  if (!path) return false;
+  return /[\\/]history[\\/]/i.test(String(path));
+}
+
+function getDocIdFromSearchItem(item) {
+  if (!item) return "";
+  const rootId = item.getAttribute?.("data-root-id") || item.dataset?.rootId;
+  if (isValidId(rootId)) return rootId.trim();
+  const docId = item.getAttribute?.("data-doc-id") || item.dataset?.docId;
+  if (isValidId(docId)) return docId.trim();
+  const nodeId = item.getAttribute?.("data-node-id") || item.dataset?.nodeId;
+  if (isValidId(nodeId)) return nodeId.trim();
+  return findAttrId(item);
+}
+
+function getDocIdFromHistoryItem(item) {
+  if (!item) return "";
+  const path = item.getAttribute?.("data-path") || item.dataset?.path;
+  const fromPath = extractDocIdFromPath(path);
+  if (isValidId(fromPath)) return fromPath.trim();
+  const rootId = item.getAttribute?.("data-root-id") || item.dataset?.rootId;
+  if (isValidId(rootId)) return rootId.trim();
+  const nodeId = item.getAttribute?.("data-node-id") || item.dataset?.nodeId;
+  if (isValidId(nodeId)) return nodeId.trim();
+  return findAttrId(item);
+}
+
+function getNotebookIdFromHistoryItem(item) {
+  if (!item) return "";
+  const attrs = [
+    item.getAttribute?.("data-notebook-id"),
+    item.getAttribute?.("data-notebook"),
+    item.getAttribute?.("data-box"),
+    item.getAttribute?.("data-box-id"),
+    item.getAttribute?.("data-boxid"),
+  ];
+  for (const value of attrs) {
+    if (isValidId(value)) return value.trim();
+  }
+  return "";
+}
+
+function pickSearchListContainer() {
+  return (
+    document.querySelector("#searchList") ||
+    document.querySelector(".search__list") ||
+    document.querySelector(".search__result") ||
+    document.querySelector(".search__panel .b3-list")
+  );
+}
+
+function pickSearchPreviewHost() {
+  return (
+    document.querySelector("#searchPreview") ||
+    document.querySelector(".search__preview.protyle") ||
+    document.querySelector(".search__preview")
+  );
+}
+
+function getSearchPanelRoot(searchList, searchPreview) {
+  const selector =
+    ".search__panel, .search__root, .search, #modelMain, .side-panel__all, .side-panel, .b3-dialog, .fn__flex-column";
+  return (
+    searchList?.closest?.(selector) ||
+    searchPreview?.closest?.(selector) ||
+    searchList?.parentElement ||
+    searchPreview?.parentElement ||
+    null
+  );
+}
+
+function pickSearchToolbar() {
+  const searchList = pickSearchListContainer();
+  const searchPreview = pickSearchPreviewHost();
+  const root = getSearchPanelRoot(searchList, searchPreview);
+  const scopes = [root, document].filter(Boolean);
+  const desktopSelectors = [
+    ".search__header .block__icons",
+    ".b3-form__icon.search__header .block__icons",
+  ];
+  for (const scope of scopes) {
+    for (const sel of desktopSelectors) {
+      const foundList = Array.from(scope.querySelectorAll(sel));
+      const visible = foundList.filter((el) => !isHiddenByClass(el) && isElementVisible(el));
+      if (visible.length) return visible[0];
+    }
+  }
+  const mobileSelectors = [".toolbar"];
+  for (const scope of scopes) {
+    for (const sel of mobileSelectors) {
+      const foundList = Array.from(scope.querySelectorAll(sel));
+      const candidates = foundList.filter(
+        (el) => el.querySelector(".toolbar__icon") && !isHiddenByClass(el) && isElementVisible(el),
+      );
+      const picked = pickNearestFollowing(candidates, searchList) || candidates[0];
+      if (picked) return picked;
+    }
+  }
+  return null;
+}
+
+function isHiddenByClass(el) {
+  if (!el || !el.classList) return false;
+  return el.classList.contains("fn__none") || el.classList.contains("fn__hidden");
+}
+
+function findClosestByAttr(target, attr) {
+  if (!target) return null;
+  if (typeof target.closest === "function") {
+    const found = target.closest(`[${attr}]`);
+    if (found) return found;
+  }
+  let node = target;
+  while (node) {
+    if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute(attr)) return node;
+    node = node.parentNode;
+  }
+  return null;
+}
+
+function isElementVisible(el) {
+  if (!el) return false;
+  if (el.offsetParent !== null) return true;
+  if (typeof el.getClientRects === "function") {
+    return el.getClientRects().length > 0;
+  }
+  return false;
+}
+
+function pickNearestFollowing(candidates, anchor) {
+  if (!candidates.length) return null;
+  const ordered = candidates.slice().sort((a, b) => {
+    if (a === b) return 0;
+    const pos = a.compareDocumentPosition(b);
+    if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+    return 0;
+  });
+  if (!anchor) return ordered[0];
+  const after = ordered.filter((node) => anchor.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING);
+  return after[0] || ordered[0];
+}
+
+function getSearchToolbarMode(toolbar) {
+  if (!toolbar) return "block";
+  if (toolbar.classList.contains("block__icons")) return "block";
+  if (toolbar.classList.contains("toolbar")) return "toolbar";
+  if (toolbar.querySelector(".block__icon")) return "block";
+  if (toolbar.querySelector(".toolbar__icon")) return "toolbar";
+  return "block";
+}
+
+function pickSearchToggleSample(toolbar, mode) {
+  if (!toolbar) return null;
+  if (mode === "toolbar") {
+    return toolbar.querySelector("svg.toolbar__icon") || toolbar.querySelector("svg");
+  }
+  return toolbar.querySelector(".block__icon");
+}
+
+function insertSearchToggle(toolbar, btn, mode) {
+  if (!toolbar || !btn) return;
+  if (mode === "block" && toolbar.querySelector(".fn__space")) {
+    let space = btn.__uiLockGuardSpace;
+    if (!space || !space.classList?.contains("fn__space")) {
+      space = document.createElement("span");
+      space.className = "fn__space";
+      btn.__uiLockGuardSpace = space;
+    }
+    toolbar.appendChild(space);
+  }
+  toolbar.appendChild(btn);
+}
+
+function stripSearchToggleAttributes(btn) {
+  if (!btn) return;
+  const removeAttrs = [
+    "id",
+    "title",
+    "data-type",
+    "data-action",
+    "data-menu",
+    "data-position",
+    "data-title",
+    "data-target-id",
+    "data-node-id",
+    "data-doc-id",
+    "data-url",
+    "data-path",
+    "data-href",
+    "data-uid",
+    "href",
+    "disabled",
+    "aria-disabled",
+    "aria-pressed",
+    "aria-selected",
+    "aria-expanded",
+    "aria-haspopup",
+    "aria-current",
+    "aria-label",
+  ];
+  for (const attr of removeAttrs) btn.removeAttribute(attr);
+  const datasetKeys = [
+    "type",
+    "action",
+    "menu",
+    "position",
+    "title",
+    "targetId",
+    "nodeId",
+    "docId",
+    "url",
+    "path",
+    "uid",
+    "id",
+  ];
+  for (const key of datasetKeys) {
+    if (btn.dataset && Object.prototype.hasOwnProperty.call(btn.dataset, key)) delete btn.dataset[key];
+  }
+  btn
+    .querySelectorAll("[data-type],[data-action],[data-menu],[data-target-id],[data-node-id],[data-doc-id],[data-url],[data-path],[data-id]")
+    .forEach((node) => {
+      node.removeAttribute("data-type");
+      node.removeAttribute("data-action");
+      node.removeAttribute("data-menu");
+      node.removeAttribute("data-target-id");
+      node.removeAttribute("data-node-id");
+      node.removeAttribute("data-doc-id");
+      node.removeAttribute("data-url");
+      node.removeAttribute("data-path");
+      node.removeAttribute("data-id");
+    });
+}
+
+function syncSearchToggleIcon(btn, iconId) {
+  if (!btn) return;
+  let svg = null;
+  if (btn.tagName && btn.tagName.toLowerCase() === "svg") {
+    svg = btn;
+  } else {
+    svg = btn.querySelector("svg");
+  }
+  if (!svg) {
+    svg = document.createElementNS(SVG_NS, "svg");
+    if (btn.__uiLockGuardSvgClass) svg.setAttribute("class", btn.__uiLockGuardSvgClass);
+    btn.textContent = "";
+    btn.appendChild(svg);
+  }
+  svg.innerHTML = `<use xlink:href="#${iconId}"></use>`;
+}
+
+function pickHistoryListContainer() {
+  const item = document.querySelector("li.b3-list-item[data-type='doc'][data-path]");
+  const path = item?.getAttribute?.("data-path") || item?.dataset?.path;
+  if (item && isHistoryPath(path)) {
+    const panel = item.closest(".history__panel, .history, .b3-dialog, .fn__flex");
+    const explicit =
+      item.closest("ul.history__side") ||
+      panel?.querySelector?.("ul.history__side") ||
+      panel?.querySelector?.("ul.b3-list.history__side");
+    if (explicit) return explicit;
+    let current = item.closest("ul");
+    let candidate = current;
+    while (current) {
+      if (current.classList?.contains("history__side")) {
+        candidate = current;
+        break;
+      }
+      const docCount = current.querySelectorAll("li.b3-list-item[data-type='doc'][data-path]").length;
+      if (docCount > 1 || current.classList?.contains("b3-list")) {
+        candidate = current;
+      }
+      const parentUl = current.parentElement?.closest?.("ul");
+      if (!parentUl) break;
+      if (panel && !panel.contains(parentUl)) break;
+      current = parentUl;
+    }
+    return candidate || item.closest("ul") || item.parentElement;
+  }
+  return (
+    document.querySelector(".history__side") ||
+    document.querySelector(".history__list") ||
+    document.querySelector(".history__repo")
+  );
+}
+
+function pickHistoryPreviewHost() {
+  return (
+    document.querySelector(".history__text.protyle") ||
+    document.querySelector(".history__text [data-type='docPanel']") ||
+    document.querySelector("[data-type='docPanel'].history__text")
+  );
+}
+
+function findFocusedListItem(container, itemSelector) {
+  if (!container) return null;
+  const selectors = [
+    `${itemSelector}.b3-list-item--focus`,
+    `${itemSelector}.b3-list-item--selected`,
+    `${itemSelector}.b3-list-item--current`,
+    `${itemSelector}[aria-current='true']`,
+  ];
+  for (const sel of selectors) {
+    const item = container.querySelector(sel);
+    if (item) return item;
+  }
+  return container.querySelector(itemSelector);
 }
 
 function findAttrId(el) {
@@ -651,6 +977,22 @@ class UiLockGuardPlugin extends Plugin {
     this.docTreeBindTimer = null;
     this.docTreeRefreshTimer = null;
     this.globalTreeListeners = false;
+    this.searchListContainer = null;
+    this.searchObserver = null;
+    this.searchBindTimer = null;
+    this.searchRefreshTimer = null;
+    this.searchRefreshToken = 0;
+    this.searchPanelActive = false;
+    this.historyListContainer = null;
+    this.historyObserver = null;
+    this.historyBindTimer = null;
+    this.historyRefreshTimer = null;
+    this.docOpenSources = new Map();
+    this.searchToggleEl = null;
+    this.searchHideLockedEnabled = false;
+    this.searchHiddenCount = 0;
+    this.searchToggleNoticePending = false;
+    this.searchToggleListenerBound = false;
     this.autoLockTimer = null;
     this.autoLockTick = null;
     this.autoLockTriggered = false;
@@ -681,9 +1023,12 @@ class UiLockGuardPlugin extends Plugin {
   }
 
   onload() {
-    this.addIcons(LOCK_ICON_SVG + UNLOCK_ICON_SVG);
+    this.addIcons(LOCK_ICON_SVG + UNLOCK_ICON_SVG + SEARCH_SHOW_ICON_SVG + SEARCH_HIDE_ICON_SVG);
     this.initSettingPanel();
     this.bindDocTreeLater();
+    this.bindSearchLater();
+    this.bindSearchToggleListener();
+    this.bindHistoryLater();
 
     this.eventBus.on("open-menu-doctree", this.onDocTreeMenu);
     this.eventBus.on("switch-protyle", this.onSwitchProtyle);
@@ -712,6 +1057,26 @@ class UiLockGuardPlugin extends Plugin {
     }
     this.detachDocTree();
     this.unbindGlobalDocTreeListeners();
+    if (this.searchBindTimer) {
+      clearInterval(this.searchBindTimer);
+      this.searchBindTimer = null;
+    }
+    if (this.searchRefreshTimer) {
+      clearTimeout(this.searchRefreshTimer);
+      this.searchRefreshTimer = null;
+    }
+    this.unbindSearchToggleListener();
+    if (this.historyBindTimer) {
+      clearInterval(this.historyBindTimer);
+      this.historyBindTimer = null;
+    }
+    if (this.historyRefreshTimer) {
+      clearTimeout(this.historyRefreshTimer);
+      this.historyRefreshTimer = null;
+    }
+    this.detachSearchList();
+    this.detachHistoryList();
+    this.docOpenSources.clear();
     this.clearDocTreeMarks();
     this.clearAllOverlays();
     this.clearTrustTimers();
@@ -818,12 +1183,77 @@ class UiLockGuardPlugin extends Plugin {
     return !this.sessionUnlocks.has(makeLockKey(lock.type, lock.id));
   }
 
-  async resolveDocLockState(docId) {
-    const directLock = this.getLock("doc", docId);
-    if (directLock && this.isLockedNow(directLock)) {
-      return {locked: true, lock: directLock, reason: "doc"};
+  async resolveDocLockState(docId, options = {}) {
+    if (!isValidId(docId)) {
+      return {locked: false, lock: null, reason: ""};
     }
-    return {locked: false, lock: directLock, reason: directLock ? "doc" : ""};
+    const directLock = this.getLock("doc", docId);
+    const hasDirectLock = Boolean(directLock);
+    const directLocked = directLock ? this.isLockedNow(directLock) : false;
+    const preferNotebook = options.preferNotebook === true || options.source === "tree";
+
+    let notebookId = "";
+    let notebookLock = null;
+    let notebookTitle = "";
+    if (preferNotebook || !hasDirectLock) {
+      const notebookHint = options.notebookId;
+      if (isValidId(notebookHint)) {
+        notebookId = notebookHint.trim();
+        this.docToNotebookCache.set(docId, notebookId);
+      } else {
+        notebookId = await this.getNotebookIdForDoc(docId);
+      }
+      if (isValidId(notebookId)) {
+        const candidate = this.getLock("notebook", notebookId);
+        if (candidate && this.isLockedNow(candidate)) {
+          notebookLock = candidate;
+          notebookTitle = candidate.title || notebookId;
+        }
+      }
+    }
+
+    if (preferNotebook && notebookLock) {
+      return {
+        locked: true,
+        lock: notebookLock,
+        reason: "notebook",
+        notebookId,
+        notebookTitle,
+        docLock: directLock,
+        notebookLock,
+      };
+    }
+    if (directLocked) {
+      return {
+        locked: true,
+        lock: directLock,
+        reason: "doc",
+        notebookId,
+        notebookTitle,
+        docLock: directLock,
+        notebookLock,
+      };
+    }
+    if (notebookLock) {
+      return {
+        locked: true,
+        lock: notebookLock,
+        reason: "notebook",
+        notebookId,
+        notebookTitle,
+        docLock: directLock,
+        notebookLock,
+      };
+    }
+    return {
+      locked: false,
+      lock: directLock,
+      reason: directLock ? "doc" : "",
+      notebookId,
+      notebookTitle,
+      docLock: directLock,
+      notebookLock,
+    };
   }
 
   async getNotebookIdForDoc(docId) {
@@ -976,6 +1406,424 @@ class UiLockGuardPlugin extends Plugin {
     document.removeEventListener("mousedown", this.onDocTreeMouseDown, true);
     document.removeEventListener("touchstart", this.onDocTreeTouchStart, true);
     document.removeEventListener("click", this.onDocTreeClick, true);
+  }
+
+  bindSearchToggleListener() {
+    if (this.searchToggleListenerBound) return;
+    this.searchToggleListenerBound = true;
+    document.addEventListener("click", this.onSearchToggleClick, true);
+  }
+
+  unbindSearchToggleListener() {
+    if (!this.searchToggleListenerBound) return;
+    this.searchToggleListenerBound = false;
+    document.removeEventListener("click", this.onSearchToggleClick, true);
+  }
+
+  bindSearchLater() {
+    if (this.searchBindTimer) clearInterval(this.searchBindTimer);
+    this.searchBindTimer = setInterval(() => {
+      const container = pickSearchListContainer();
+      const toolbar = pickSearchToolbar();
+      const preview = pickSearchPreviewHost();
+      const panelActive = Boolean(container || toolbar || preview);
+      if (this.searchPanelActive && !panelActive) {
+        this.searchPanelActive = false;
+        this.detachSearchList({reset: true});
+        return;
+      }
+      if (panelActive && !this.searchPanelActive) {
+        this.searchPanelActive = true;
+        this.searchHideLockedEnabled = false;
+        this.searchHiddenCount = 0;
+        this.searchToggleNoticePending = false;
+      }
+      if (this.searchListContainer && !this.searchListContainer.isConnected) {
+        this.detachSearchList({reset: false});
+      }
+      if (container && container !== this.searchListContainer) {
+        this.attachSearchList(container);
+        return;
+      }
+      if (!container && this.searchListContainer) {
+        this.detachSearchList({reset: false});
+      }
+    }, 900);
+  }
+
+  attachSearchList(container) {
+    if (!container) return;
+    this.detachSearchList({reset: false});
+    this.searchListContainer = container;
+    this.searchListContainer.addEventListener("click", this.onSearchListClick, true);
+    this.searchObserver = new MutationObserver(() => this.scheduleSearchRefresh());
+    this.searchObserver.observe(this.searchListContainer, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    this.scheduleSearchRefresh();
+  }
+
+  detachSearchList({reset = true} = {}) {
+    if (this.searchListContainer) {
+      this.searchListContainer.removeEventListener("click", this.onSearchListClick, true);
+    }
+    if (this.searchObserver) {
+      this.searchObserver.disconnect();
+      this.searchObserver = null;
+    }
+    this.searchListContainer = null;
+    if (reset) {
+      this.searchHideLockedEnabled = false;
+      this.searchHiddenCount = 0;
+      this.searchToggleNoticePending = false;
+      if (this.searchToggleEl && !this.searchToggleEl.isConnected) {
+        this.searchToggleEl = null;
+      }
+    }
+    this.updateSearchToggleUI();
+  }
+
+  scheduleSearchRefresh() {
+    if (this.searchRefreshTimer) return;
+    this.searchRefreshTimer = setTimeout(() => {
+      this.searchRefreshTimer = null;
+      void this.refreshSearchMasks();
+    }, 80);
+  }
+
+  ensureSearchToggle() {
+    const toolbar = pickSearchToolbar();
+    if (!toolbar) {
+      if (this.searchToggleEl && !this.searchToggleEl.isConnected) {
+        this.searchToggleEl = null;
+      }
+      return;
+    }
+
+    const mode = getSearchToolbarMode(toolbar);
+    const existing = Array.from(toolbar.querySelectorAll("[data-ui-lock-guard-search-toggle]"));
+    if (existing.length > 0) {
+      const primary = existing[0];
+      for (let i = 1; i < existing.length; i += 1) {
+        existing[i].remove();
+      }
+      this.searchToggleEl = primary;
+      this.searchToggleEl.setAttribute("data-ui-lock-guard-mode", mode);
+      this.updateSearchToggleUI();
+      return;
+    }
+
+    if (this.searchToggleEl && this.searchToggleEl.isConnected) {
+      if (this.searchToggleEl.parentElement !== toolbar) {
+        this.searchToggleEl.setAttribute("data-ui-lock-guard-mode", mode);
+        insertSearchToggle(toolbar, this.searchToggleEl, mode);
+      }
+      this.updateSearchToggleUI();
+      return;
+    }
+    if (this.searchToggleEl && !this.searchToggleEl.isConnected) {
+      this.searchToggleEl = null;
+    }
+
+    const sampleButton = pickSearchToggleSample(toolbar, mode);
+    let btn = null;
+    if (sampleButton) {
+      btn = sampleButton.cloneNode(true);
+      stripSearchToggleAttributes(btn);
+      const sampleSvg = sampleButton.querySelector("svg");
+      btn.__uiLockGuardSvgClass = sampleSvg?.getAttribute("class") || "";
+      btn.__uiLockGuardPosition = sampleButton.getAttribute?.("data-position") || "";
+      btn.classList.remove("fn__hidden", "fn__none");
+    } else {
+      if (mode === "toolbar") {
+        btn = document.createElementNS(SVG_NS, "svg");
+        btn.setAttribute("class", "toolbar__icon");
+        btn.setAttribute("viewBox", "0 0 24 24");
+      } else {
+        btn = document.createElement("span");
+        btn.className = "block__icon ariaLabel";
+      }
+    }
+    if (btn.tagName === "BUTTON") {
+      btn.type = "button";
+    }
+    if (!btn.hasAttribute("tabindex")) {
+      btn.setAttribute("tabindex", "0");
+    }
+    if (btn.style) {
+      btn.style.display = "";
+      btn.style.visibility = "";
+      btn.style.opacity = "";
+    }
+    btn.setAttribute("data-ui-lock-guard-search-toggle", "1");
+    btn.setAttribute("data-ui-lock-guard-mode", mode);
+    btn.removeAttribute("title");
+    if (mode === "block" && btn.classList) {
+      btn.classList.add("ariaLabel");
+      if (!btn.getAttribute("data-position")) {
+        const position = btn.__uiLockGuardPosition || "9south";
+        btn.setAttribute("data-position", position);
+      }
+    }
+    insertSearchToggle(toolbar, btn, mode);
+    this.searchToggleEl = btn;
+
+    this.updateSearchToggleUI();
+  }
+
+  updateSearchToggleUI() {
+    if (!this.searchToggleEl) return;
+    const enabled = this.searchHideLockedEnabled;
+    const iconId = enabled ? SEARCH_HIDE_ICON_ID : SEARCH_SHOW_ICON_ID;
+    syncSearchToggleIcon(this.searchToggleEl, iconId);
+    const title = enabled ? this.t("search.toggleShowLocked") : this.t("search.toggleHideLocked");
+    this.searchToggleEl.removeAttribute("title");
+    this.searchToggleEl.setAttribute("aria-label", title);
+    this.searchToggleEl.setAttribute("data-title", title);
+    const mode =
+      this.searchToggleEl.getAttribute("data-ui-lock-guard-mode") ||
+      getSearchToolbarMode(this.searchToggleEl.parentElement);
+    if (mode === "block") {
+      this.searchToggleEl.classList?.add("ariaLabel");
+      if (!this.searchToggleEl.getAttribute("data-position")) {
+        const position = this.searchToggleEl.__uiLockGuardPosition || "9south";
+        this.searchToggleEl.setAttribute("data-position", position);
+      }
+    }
+  }
+
+  onSearchToggleClick = (event) => {
+    const btn = findClosestByAttr(event.target, "data-ui-lock-guard-search-toggle");
+    if (!btn) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.searchToggleEl = btn;
+    this.searchHideLockedEnabled = !this.searchHideLockedEnabled;
+    this.searchToggleNoticePending = this.searchHideLockedEnabled;
+    this.updateSearchToggleUI();
+    this.scheduleSearchRefresh();
+  };
+
+  maskSearchText(textEl, placeholder) {
+    if (!textEl) return;
+    if (textEl.textContent !== placeholder) {
+      textEl.__uiLockGuardOriginalHtml = textEl.innerHTML;
+    }
+    textEl.textContent = placeholder;
+    textEl.classList.add("ui-lock-guard__search-masked");
+  }
+
+  unmaskSearchText(textEl) {
+    if (!textEl) return;
+    if (textEl.classList.contains("ui-lock-guard__search-masked") && textEl.__uiLockGuardOriginalHtml) {
+      textEl.innerHTML = textEl.__uiLockGuardOriginalHtml;
+    }
+    textEl.__uiLockGuardOriginalHtml = "";
+    textEl.classList.remove("ui-lock-guard__search-masked");
+  }
+
+  clearOverlayForHost(host) {
+    if (!host) return;
+    const overlay = this.protyleOverlays.get(host);
+    if (!overlay) return;
+    overlay.classList.remove("ui-lock-guard__overlay--show");
+    overlay.dataset.lockKey = "";
+    overlay.dataset.lockReason = "";
+    overlay.dataset.lockNotebookTitle = "";
+    overlay.dataset.lockNotebookId = "";
+  }
+
+  async refreshSearchMasks() {
+    const container =
+      this.searchListContainer && this.searchListContainer.isConnected ? this.searchListContainer : pickSearchListContainer();
+    if (container && container !== this.searchListContainer) {
+      this.attachSearchList(container);
+    }
+    if (!container) return;
+    this.ensureSearchToggle();
+    const token = ++this.searchRefreshToken;
+    const items = Array.from(container.querySelectorAll("[data-type='search-item']"));
+    if (!items.length) {
+      const host = pickSearchPreviewHost();
+      if (host) this.clearOverlayForHost(host);
+      this.searchHiddenCount = 0;
+      this.updateSearchToggleUI();
+      if (this.searchHideLockedEnabled && this.searchToggleNoticePending) {
+        this.searchToggleNoticePending = false;
+        showMessage(this.t("search.hiddenEmpty"));
+      }
+      return;
+    }
+
+    const hasLockedNotebook = this.locks.some((lock) => lock.type === "notebook" && this.isLockedNow(lock));
+    const placeholder = this.t("search.lockedSnippet");
+    let focusedItem = null;
+    let hiddenCount = 0;
+
+    for (const item of items) {
+      if (token !== this.searchRefreshToken) return;
+      if (
+        !focusedItem &&
+        (item.classList.contains("b3-list-item--focus") ||
+          item.classList.contains("b3-list-item--selected") ||
+          item.classList.contains("b3-list-item--current") ||
+          item.getAttribute("aria-current") === "true")
+      ) {
+        focusedItem = item;
+      }
+      const textEl = item.querySelector(".b3-list-item__text");
+      if (!textEl) continue;
+      const docId = getDocIdFromSearchItem(item);
+      if (!docId) {
+        this.unmaskSearchText(textEl);
+        continue;
+      }
+
+      let locked = false;
+      const docLock = this.getLock("doc", docId);
+      if (docLock) {
+        locked = this.isLockedNow(docLock);
+      } else if (hasLockedNotebook) {
+        const notebookId =
+          item.getAttribute?.("data-notebook-id") ||
+          item.getAttribute?.("data-notebook") ||
+          item.dataset?.notebookId ||
+          item.dataset?.notebook;
+        const state = await this.resolveDocLockState(docId, {source: "search", notebookId});
+        if (token !== this.searchRefreshToken) return;
+        locked = state.locked;
+      }
+
+      if (this.searchHideLockedEnabled) {
+        if (locked) {
+          item.classList.add("ui-lock-guard__search-hidden");
+          hiddenCount += 1;
+          this.unmaskSearchText(textEl);
+        } else {
+          item.classList.remove("ui-lock-guard__search-hidden");
+          this.unmaskSearchText(textEl);
+        }
+      } else {
+        item.classList.remove("ui-lock-guard__search-hidden");
+        if (locked) this.maskSearchText(textEl, placeholder);
+        else this.unmaskSearchText(textEl);
+      }
+    }
+
+    this.searchHiddenCount = hiddenCount;
+    this.updateSearchToggleUI();
+    if (this.searchHideLockedEnabled && this.searchToggleNoticePending) {
+      this.searchToggleNoticePending = false;
+      if (hiddenCount > 0) {
+        showMessage(this.t("search.hiddenCount", {count: hiddenCount}));
+      } else {
+        showMessage(this.t("search.hiddenEmpty"));
+      }
+    }
+
+    const previewHost = pickSearchPreviewHost();
+    if (previewHost) {
+      let focused = focusedItem || findFocusedListItem(container, "[data-type='search-item']");
+      const docId = getDocIdFromSearchItem(focused);
+      if (docId) {
+        await this.applyLockOverlay({host: previewHost, docId, source: "search"});
+      } else {
+        this.clearOverlayForHost(previewHost);
+      }
+    }
+  }
+
+  bindHistoryLater() {
+    if (this.historyBindTimer) clearInterval(this.historyBindTimer);
+    this.historyBindTimer = setInterval(() => {
+      const container = pickHistoryListContainer();
+      if (this.historyListContainer && !this.historyListContainer.isConnected) {
+        this.detachHistoryList();
+      }
+      if (container && container !== this.historyListContainer) {
+        this.attachHistoryList(container);
+        return;
+      }
+      if (!container && this.historyListContainer) {
+        this.detachHistoryList();
+      }
+    }, 900);
+  }
+
+  attachHistoryList(container) {
+    if (!container) return;
+    this.detachHistoryList();
+    this.historyListContainer = container;
+    this.historyListContainer.addEventListener("pointerdown", this.onHistoryListPointerDown, true);
+    this.historyListContainer.addEventListener("click", this.onHistoryListClick, true);
+    this.historyObserver = new MutationObserver(() => this.scheduleHistoryRefresh());
+    this.historyObserver.observe(this.historyListContainer, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "aria-current", "aria-selected", "aria-expanded"],
+    });
+    this.scheduleHistoryRefresh();
+  }
+
+  detachHistoryList() {
+    if (this.historyListContainer) {
+      this.historyListContainer.removeEventListener("pointerdown", this.onHistoryListPointerDown, true);
+      this.historyListContainer.removeEventListener("click", this.onHistoryListClick, true);
+    }
+    if (this.historyObserver) {
+      this.historyObserver.disconnect();
+      this.historyObserver = null;
+    }
+    this.historyListContainer = null;
+  }
+
+  scheduleHistoryRefresh() {
+    if (this.historyRefreshTimer) return;
+    this.historyRefreshTimer = setTimeout(() => {
+      this.historyRefreshTimer = null;
+      void this.refreshHistoryPreview();
+    }, 80);
+  }
+
+  async refreshHistoryPreview() {
+    const host = pickHistoryPreviewHost();
+    if (!host) return;
+    const candidate = pickHistoryListContainer();
+    if (candidate && candidate !== this.historyListContainer) {
+      this.attachHistoryList(candidate);
+    }
+    const listContainer =
+      (this.historyListContainer && this.historyListContainer.isConnected ? this.historyListContainer : null) ||
+      candidate ||
+      document;
+    const selector = "li.b3-list-item[data-type='doc'][data-path]";
+    let item = findFocusedListItem(listContainer, selector);
+    if (item) {
+      const path = item.getAttribute?.("data-path") || item.dataset?.path;
+      if (!isHistoryPath(path)) {
+        item = null;
+      }
+    }
+    if (!item) {
+      const candidates = Array.from(listContainer.querySelectorAll("li.b3-list-item[data-type='doc'][data-path]"));
+      item = candidates.find((node) => isHistoryPath(node.getAttribute?.("data-path") || node.dataset?.path));
+    }
+    if (!item) {
+      this.clearOverlayForHost(host);
+      return;
+    }
+
+    const docId = getDocIdFromHistoryItem(item);
+    if (!docId) {
+      this.clearOverlayForHost(host);
+      return;
+    }
+    const notebookId = getNotebookIdFromHistoryItem(item);
+    await this.applyLockOverlay({host, docId, source: "history", notebookId});
   }
 
   scheduleDocTreeRefresh() {
@@ -1146,6 +1994,28 @@ class UiLockGuardPlugin extends Plugin {
     return lock ? {lock, info} : null;
   }
 
+  markDocOpenSource(docId, source) {
+    if (!isValidId(docId) || !source) return;
+    const now = nowTs();
+    this.docOpenSources.set(docId, {source, time: now});
+    for (const [key, entry] of this.docOpenSources.entries()) {
+      if (now - entry.time > DOC_SOURCE_TTL) {
+        this.docOpenSources.delete(key);
+      }
+    }
+  }
+
+  getRecentDocOpenSource(docId) {
+    if (!isValidId(docId)) return "";
+    const entry = this.docOpenSources.get(docId);
+    if (!entry) return "";
+    if (nowTs() - entry.time > DOC_SOURCE_TTL) {
+      this.docOpenSources.delete(docId);
+      return "";
+    }
+    return entry.source || "";
+  }
+
   getDocIdFromProtyle(protyle) {
     const pid = protyle?.id;
     if (isValidId(pid)) return pid.trim();
@@ -1162,33 +2032,63 @@ class UiLockGuardPlugin extends Plugin {
     for (const protyle of protyles) {
       void this.refreshProtyle(protyle);
     }
+    void this.refreshSearchMasks();
+    void this.refreshHistoryPreview();
+  }
+
+  async applyLockOverlay({host, docId, source, notebookId} = {}) {
+    if (!docId || !host) return;
+    const state = await this.resolveDocLockState(docId, {
+      source,
+      notebookId,
+    });
+    const overlay = this.ensureProtyleOverlay(host);
+    if (state.locked) {
+      overlay.classList.add("ui-lock-guard__overlay--show");
+      overlay.dataset.lockKey = makeLockKey(state.lock.type, state.lock.id);
+      overlay.dataset.lockReason = state.reason || "";
+      overlay.dataset.lockNotebookTitle = state.notebookTitle || "";
+      overlay.dataset.lockNotebookId = state.notebookId || "";
+      const titleEl = overlay.querySelector("[data-lock-title]");
+      const subEl = overlay.querySelector("[data-lock-sub]");
+      if (titleEl) titleEl.textContent = this.t("overlay.lockedTitle");
+      if (subEl) {
+        if (state.reason === "notebook" && state.notebookTitle) {
+          subEl.textContent = this.t("overlay.notebookLockedWithName", {name: state.notebookTitle});
+        } else {
+          subEl.textContent =
+            state.reason === "notebook" ? this.t("overlay.notebookLocked") : this.t("overlay.docLocked");
+        }
+      }
+    } else {
+      overlay.classList.remove("ui-lock-guard__overlay--show");
+      overlay.dataset.lockKey = "";
+      overlay.dataset.lockReason = "";
+      overlay.dataset.lockNotebookTitle = "";
+      overlay.dataset.lockNotebookId = "";
+    }
   }
 
   async refreshProtyle(protyle) {
     const docId = this.getDocIdFromProtyle(protyle);
     if (!docId) return;
-    const state = await this.resolveDocLockState(docId);
-    const overlay = this.ensureProtyleOverlay(protyle);
-    if (state.locked) {
-      overlay.classList.add("ui-lock-guard__overlay--show");
-      overlay.dataset.lockKey = makeLockKey(state.lock.type, state.lock.id);
-      const titleEl = overlay.querySelector("[data-lock-title]");
-      const subEl = overlay.querySelector("[data-lock-sub]");
-      if (titleEl) titleEl.textContent = this.t("overlay.lockedTitle");
-      if (subEl) {
-        subEl.textContent =
-          state.reason === "notebook" ? this.t("overlay.notebookLocked") : this.t("overlay.docLocked");
-      }
-    } else {
-      overlay.classList.remove("ui-lock-guard__overlay--show");
-      overlay.dataset.lockKey = "";
-    }
+    const source = this.getRecentDocOpenSource(docId);
+    const host = protyle?.element || protyle?.contentElement || protyle?.container || protyle;
+    await this.applyLockOverlay({host, docId, source});
   }
 
   ensureProtyleOverlay(protyle) {
-    const host = protyle?.element || protyle?.contentElement || protyle?.container;
+    const host =
+      protyle?.element || protyle?.contentElement || protyle?.container || (protyle?.nodeType === 1 ? protyle : null);
     if (!host) return document.createElement("div");
-    if (this.protyleOverlays.has(host)) return this.protyleOverlays.get(host);
+    if (this.protyleOverlays.has(host)) {
+      const cached = this.protyleOverlays.get(host);
+      if (cached && cached.isConnected && cached.parentElement === host) return cached;
+      if (cached && cached.parentElement && cached.parentElement !== host) {
+        cached.remove();
+      }
+      this.protyleOverlays.delete(host);
+    }
 
     host.classList.add("ui-lock-guard__protyle");
     const overlay = document.createElement("div");
@@ -1208,7 +2108,13 @@ class UiLockGuardPlugin extends Plugin {
       if (!btn) return;
       const key = overlay.dataset.lockKey;
       const lock = this.getLockByKey(key);
-      if (lock) void this.unlockLock(lock);
+      if (lock) {
+        const reason = overlay.dataset.lockReason || "";
+        const notebookTitle = overlay.dataset.lockNotebookTitle || lock.title || lock.id;
+        const hint =
+          reason === "notebook" ? this.t("unlock.hintNotebook", {name: notebookTitle || lock.id}) : "";
+        void this.unlockLock(lock, {hint});
+      }
     });
 
     host.appendChild(overlay);
@@ -1230,6 +2136,9 @@ class UiLockGuardPlugin extends Plugin {
       if (overlay.dataset.lockKey === key) {
         overlay.classList.remove("ui-lock-guard__overlay--show");
         overlay.dataset.lockKey = "";
+        overlay.dataset.lockReason = "";
+        overlay.dataset.lockNotebookTitle = "";
+        overlay.dataset.lockNotebookId = "";
       }
     }
   }
@@ -1243,6 +2152,54 @@ class UiLockGuardPlugin extends Plugin {
     void this.refreshProtyle(detail?.protyle);
     this.scheduleDocTreeRefresh();
   };
+
+  onSearchListClick = (event) => {
+    const item = event.target?.closest?.("[data-type='search-item']");
+    if (!item) return;
+    const docId = getDocIdFromSearchItem(item);
+    if (docId) this.markDocOpenSource(docId, "search");
+    this.scheduleSearchRefresh();
+  };
+
+  onHistoryListPointerDown = (event) => {
+    const item = event.target?.closest?.("li.b3-list-item[data-type='doc'][data-path]");
+    if (!item) return;
+    const path = item.getAttribute?.("data-path") || item.dataset?.path;
+    if (!isHistoryPath(path)) return;
+    const docId = getDocIdFromHistoryItem(item);
+    if (docId) this.markDocOpenSource(docId, "history");
+    this.scheduleHistoryRefresh();
+  };
+
+  onHistoryListClick = (event) => {
+    const item = event.target?.closest?.("li.b3-list-item[data-type='doc'][data-path]");
+    if (!item) return;
+    const path = item.getAttribute?.("data-path") || item.dataset?.path;
+    if (!isHistoryPath(path)) return;
+    const docId = getDocIdFromHistoryItem(item);
+    if (docId) this.markDocOpenSource(docId, "history");
+    this.scheduleHistoryRefresh();
+  };
+
+  trackDocTreeDocOpen(event) {
+    if (!event || event.isTrusted === false) return;
+    const target = event.target;
+    if (!target) return;
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const pathItem = path.find((node) => node?.classList?.contains("b3-list-item"));
+    const item =
+      pathItem ||
+      target.closest(".b3-list-item") ||
+      (target.closest("ul")?.previousElementSibling?.classList?.contains("b3-list-item")
+        ? target.closest("ul").previousElementSibling
+        : null);
+    if (!item) return;
+    const inDocTree = this.docTreeContainer?.isConnected && this.docTreeContainer.contains(item);
+    if (!inDocTree && !isProbablyDocTreeItem(item)) return;
+    const info = resolveTreeItemInfo(item);
+    if (!info?.id || info.isNotebook) return;
+    this.markDocOpenSource(info.id, "tree");
+  }
 
   onDocTreeMenu = ({detail}) => {
     try {
@@ -1394,11 +2351,13 @@ class UiLockGuardPlugin extends Plugin {
   };
 
   onDocTreeTouchStart = (event) => {
+    this.trackDocTreeDocOpen(event);
     void this.handleLockedNotebookInteraction(event, {deferDialog: true});
   };
 
   onDocTreeClick = (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== undefined && event.button !== 0) return;
+    this.trackDocTreeDocOpen(event);
     void this.handleLockedNotebookInteraction(event);
   };
 
@@ -1932,14 +2891,15 @@ class UiLockGuardPlugin extends Plugin {
     });
   }
 
-  async unlockLock(lock) {
+  async unlockLock(lock, options = {}) {
     if (!lock) return false;
     if (!this.isLockedNow(lock) && lock.policy === "always") {
       showMessage(this.t("unlock.alreadyUnlocked"));
       return true;
     }
     const ok = await this.verifyLock(lock, {
-      title: this.t("unlock.dialogTitle", {name: lock.title || lock.id}),
+      title: options.title || this.t("unlock.dialogTitle", {name: lock.title || lock.id}),
+      hint: options.hint,
     });
     if (!ok) return false;
     const key = makeLockKey(lock.type, lock.id);
