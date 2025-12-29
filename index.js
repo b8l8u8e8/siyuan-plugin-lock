@@ -269,6 +269,24 @@ function extractDocIdFromPath(path) {
   return match ? match[1] : "";
 }
 
+function extractAncestorDocIds(path, docId) {
+  if (!path) return [];
+  const matches = String(path).match(/\d{14}-[a-z0-9]{7}/gi);
+  if (!matches) return [];
+  const currentId = isValidId(docId) ? docId.trim() : "";
+  const seen = new Set();
+  const result = [];
+  for (const raw of matches) {
+    const id = String(raw || "").trim();
+    if (!isValidId(id)) continue;
+    if (currentId && id === currentId) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    result.push(id);
+  }
+  return result;
+}
+
 function isHistoryPath(path) {
   if (!path) return false;
   return /[\\/]history[\\/]/i.test(String(path));
@@ -308,6 +326,38 @@ function getNotebookIdFromHistoryItem(item) {
   ];
   for (const value of attrs) {
     if (isValidId(value)) return value.trim();
+  }
+  return "";
+}
+
+function getNotebookIdFromTreeItem(item) {
+  if (!item) return "";
+  const parentList = item.closest?.(
+    "ul[data-url], ul[data-box], ul[data-box-id], ul[data-boxid], ul[data-notebook-id], ul[data-notebook]",
+  );
+  const candidates = [
+    item.getAttribute?.("data-notebook-id"),
+    item.dataset?.notebookId,
+    item.getAttribute?.("data-notebook"),
+    item.dataset?.notebook,
+    item.getAttribute?.("data-box"),
+    item.dataset?.box,
+    item.getAttribute?.("data-box-id"),
+    item.dataset?.boxId,
+    item.getAttribute?.("data-boxid"),
+    item.dataset?.boxid,
+    item.getAttribute?.("data-url"),
+    item.dataset?.url,
+    parentList?.getAttribute?.("data-url"),
+    parentList?.dataset?.url,
+    parentList?.getAttribute?.("data-box"),
+    parentList?.getAttribute?.("data-box-id"),
+    parentList?.getAttribute?.("data-boxid"),
+    parentList?.getAttribute?.("data-notebook-id"),
+    parentList?.getAttribute?.("data-notebook"),
+  ];
+  for (const value of candidates) {
+    if (isValidId(value)) return String(value).trim();
   }
   return "";
 }
@@ -374,6 +424,18 @@ function pickSearchToolbar() {
 function isHiddenByClass(el) {
   if (!el || !el.classList) return false;
   return el.classList.contains("fn__none") || el.classList.contains("fn__hidden");
+}
+
+function isTreeToggleTarget(target, item) {
+  if (!target || !item) return false;
+  const selector = ".b3-list-item__toggle, .b3-list-item__arrow, .b3-list-item__icon";
+  if (typeof target.closest === "function") {
+    const found = target.closest(selector);
+    if (found && item.contains(found)) return true;
+  }
+  const toggle = item.querySelector(selector);
+  if (!toggle) return false;
+  return toggle === target || toggle.contains(target);
 }
 
 function findClosestByAttr(target, attr) {
@@ -972,6 +1034,7 @@ class UiLockGuardPlugin extends Plugin {
     this.trustTimers = new Map();
     this.protyleOverlays = new Map();
     this.docToNotebookCache = new Map();
+    this.docAncestorCache = new Map();
     this.docTreeContainer = null;
     this.docTreeObserver = null;
     this.docTreeBindTimer = null;
@@ -1012,6 +1075,7 @@ class UiLockGuardPlugin extends Plugin {
     };
     this.patternCleanup = null;
     this.lastNotebookUnlock = {id: "", time: 0};
+    this.lastDocUnlock = {key: "", time: 0};
   }
 
   t(key, params = {}) {
@@ -1077,6 +1141,7 @@ class UiLockGuardPlugin extends Plugin {
     this.detachSearchList();
     this.detachHistoryList();
     this.docOpenSources.clear();
+    this.docAncestorCache.clear();
     this.clearDocTreeMarks();
     this.clearAllOverlays();
     this.clearTrustTimers();
@@ -1128,6 +1193,7 @@ class UiLockGuardPlugin extends Plugin {
     this.scheduleAllTrustTimers();
     this.refreshDocTreeMarks();
     this.collapseLockedNotebooks();
+    this.collapseLockedDocs();
     this.refreshAllProtyles();
     this.applyAutoLockSettings();
     this.renderSettingLockList();
@@ -1187,15 +1253,52 @@ class UiLockGuardPlugin extends Plugin {
     if (!isValidId(docId)) {
       return {locked: false, lock: null, reason: ""};
     }
+    const source = options.source || "";
+    const preferNotebook = options.preferNotebook === true || source === "tree";
+    const preferNearest = source === "search" || source === "history";
+
     const directLock = this.getLock("doc", docId);
-    const hasDirectLock = Boolean(directLock);
     const directLocked = directLock ? this.isLockedNow(directLock) : false;
-    const preferNotebook = options.preferNotebook === true || options.source === "tree";
+    const hasDocLocks = this.locks.some((lock) => lock.type === "doc");
+    const hasNotebookLocks = this.locks.some((lock) => lock.type === "notebook");
+
+    let ancestorLock = null;
+    let ancestorId = "";
+    let ancestorTitle = "";
+    let ancestorLocked = null;
+    let ancestorLockedId = "";
+    let ancestorLockedTitle = "";
+
+    const shouldCheckAncestors =
+      hasDocLocks && ((preferNearest && !directLock) || (!preferNearest && !directLocked));
+    if (shouldCheckAncestors) {
+      const ancestorIds = await this.getDocAncestorIds(docId);
+      for (let i = ancestorIds.length - 1; i >= 0; i -= 1) {
+        const id = ancestorIds[i];
+        const lock = this.getLock("doc", id);
+        if (!lock) continue;
+        if (!ancestorLock) {
+          ancestorLock = lock;
+          ancestorId = id;
+          ancestorTitle = lock.title || id;
+        }
+        if (!ancestorLocked && this.isLockedNow(lock)) {
+          ancestorLocked = lock;
+          ancestorLockedId = id;
+          ancestorLockedTitle = lock.title || id;
+        }
+        if (ancestorLock && ancestorLocked) break;
+      }
+    }
 
     let notebookId = "";
     let notebookLock = null;
     let notebookTitle = "";
-    if (preferNotebook || !hasDirectLock) {
+    let notebookChecked = false;
+    const ensureNotebookLock = async () => {
+      if (notebookChecked) return;
+      notebookChecked = true;
+      if (!hasNotebookLocks) return;
       const notebookHint = options.notebookId;
       if (isValidId(notebookHint)) {
         notebookId = notebookHint.trim();
@@ -1205,55 +1308,102 @@ class UiLockGuardPlugin extends Plugin {
       }
       if (isValidId(notebookId)) {
         const candidate = this.getLock("notebook", notebookId);
-        if (candidate && this.isLockedNow(candidate)) {
+        if (candidate) {
           notebookLock = candidate;
           notebookTitle = candidate.title || notebookId;
         }
       }
-    }
+    };
 
-    if (preferNotebook && notebookLock) {
-      return {
-        locked: true,
-        lock: notebookLock,
-        reason: "notebook",
-        notebookId,
-        notebookTitle,
-        docLock: directLock,
-        notebookLock,
-      };
-    }
-    if (directLocked) {
-      return {
-        locked: true,
-        lock: directLock,
-        reason: "doc",
-        notebookId,
-        notebookTitle,
-        docLock: directLock,
-        notebookLock,
-      };
-    }
-    if (notebookLock) {
-      return {
-        locked: true,
-        lock: notebookLock,
-        reason: "notebook",
-        notebookId,
-        notebookTitle,
-        docLock: directLock,
-        notebookLock,
-      };
-    }
-    return {
-      locked: false,
-      lock: directLock,
-      reason: directLock ? "doc" : "",
+    const buildState = ({locked, lock, reason, ancestorId: ancId, ancestorTitle: ancTitle}) => ({
+      locked,
+      lock,
+      reason,
       notebookId,
       notebookTitle,
       docLock: directLock,
       notebookLock,
-    };
+      ancestorId: ancId || "",
+      ancestorTitle: ancTitle || "",
+    });
+
+    if (preferNearest) {
+      if (directLock) {
+        return buildState({
+          locked: directLocked,
+          lock: directLock,
+          reason: "doc",
+        });
+      }
+      if (ancestorLock) {
+        return buildState({
+          locked: this.isLockedNow(ancestorLock),
+          lock: ancestorLock,
+          reason: "ancestor",
+          ancestorId,
+          ancestorTitle,
+        });
+      }
+      if (hasNotebookLocks) {
+        await ensureNotebookLock();
+        if (notebookLock) {
+          return buildState({
+            locked: this.isLockedNow(notebookLock),
+            lock: notebookLock,
+            reason: "notebook",
+          });
+        }
+      }
+      return buildState({locked: false, lock: null, reason: ""});
+    }
+
+    if (preferNotebook && hasNotebookLocks) {
+      await ensureNotebookLock();
+      if (notebookLock && this.isLockedNow(notebookLock)) {
+        return buildState({
+          locked: true,
+          lock: notebookLock,
+          reason: "notebook",
+        });
+      }
+    }
+    if (directLocked) {
+      return buildState({
+        locked: true,
+        lock: directLock,
+        reason: "doc",
+      });
+    }
+    if (ancestorLocked) {
+      return buildState({
+        locked: true,
+        lock: ancestorLocked,
+        reason: "ancestor",
+        ancestorId: ancestorLockedId,
+        ancestorTitle: ancestorLockedTitle,
+      });
+    }
+    if (hasNotebookLocks) {
+      await ensureNotebookLock();
+      if (notebookLock && this.isLockedNow(notebookLock)) {
+        return buildState({
+          locked: true,
+          lock: notebookLock,
+          reason: "notebook",
+        });
+      }
+    }
+    const fallbackLock = directLock || ancestorLock || notebookLock;
+    const fallbackReason = directLock ? "doc" : ancestorLock ? "ancestor" : notebookLock ? "notebook" : "";
+    const fallbackAncestorId = ancestorLockedId || ancestorId;
+    const fallbackAncestorTitle = ancestorLockedTitle || ancestorTitle;
+    return buildState({
+      locked: false,
+      lock: fallbackLock,
+      reason: fallbackReason,
+      ancestorId: fallbackAncestorId,
+      ancestorTitle: fallbackAncestorTitle,
+    });
   }
 
   async getNotebookIdForDoc(docId) {
@@ -1274,6 +1424,24 @@ class UiLockGuardPlugin extends Plugin {
       console.error(err);
     }
     return "";
+  }
+
+  async getDocAncestorIds(docId) {
+    if (!isValidId(docId)) return [];
+    if (this.docAncestorCache.has(docId)) return this.docAncestorCache.get(docId);
+    let ancestors = [];
+    try {
+      const resp = await fetchSyncPost("/api/query/sql", {
+        stmt: `SELECT path FROM blocks WHERE id='${docId}' LIMIT 1`,
+      });
+      if (resp && resp.code === 0 && Array.isArray(resp.data) && resp.data[0]?.path) {
+        ancestors = extractAncestorDocIds(resp.data[0].path, docId);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    this.docAncestorCache.set(docId, ancestors);
+    return ancestors;
   }
 
   async getDocTitle(docId) {
@@ -1330,6 +1498,8 @@ class UiLockGuardPlugin extends Plugin {
     this.renderSettingLockList();
     if (lock.type === "notebook") {
       this.collapseNotebookInTree(lock.id);
+    } else if (lock.type === "doc") {
+      this.collapseDocInTree(lock.id);
     }
   }
 
@@ -1352,6 +1522,7 @@ class UiLockGuardPlugin extends Plugin {
       }
       this.refreshDocTreeMarks();
       this.collapseLockedNotebooks();
+      this.collapseLockedDocs();
     }, intervalMs);
   }
 
@@ -1371,6 +1542,7 @@ class UiLockGuardPlugin extends Plugin {
     if (!skipRefresh) {
       this.refreshDocTreeMarks();
       this.collapseLockedNotebooks();
+      this.collapseLockedDocs();
     }
     return true;
   }
@@ -1634,6 +1806,8 @@ class UiLockGuardPlugin extends Plugin {
     overlay.dataset.lockReason = "";
     overlay.dataset.lockNotebookTitle = "";
     overlay.dataset.lockNotebookId = "";
+    overlay.dataset.lockAncestorTitle = "";
+    overlay.dataset.lockAncestorId = "";
   }
 
   async refreshSearchMasks() {
@@ -1658,7 +1832,9 @@ class UiLockGuardPlugin extends Plugin {
       return;
     }
 
-    const hasLockedNotebook = this.locks.some((lock) => lock.type === "notebook" && this.isLockedNow(lock));
+    const hasDocLocks = this.locks.some((lock) => lock.type === "doc");
+    const hasNotebookLocks = this.locks.some((lock) => lock.type === "notebook");
+    const hasLocks = hasDocLocks || hasNotebookLocks;
     const placeholder = this.t("search.lockedSnippet");
     let focusedItem = null;
     let hiddenCount = 0;
@@ -1683,15 +1859,13 @@ class UiLockGuardPlugin extends Plugin {
       }
 
       let locked = false;
-      const docLock = this.getLock("doc", docId);
-      if (docLock) {
-        locked = this.isLockedNow(docLock);
-      } else if (hasLockedNotebook) {
-        const notebookId =
-          item.getAttribute?.("data-notebook-id") ||
-          item.getAttribute?.("data-notebook") ||
-          item.dataset?.notebookId ||
-          item.dataset?.notebook;
+      if (hasLocks) {
+        const notebookId = hasNotebookLocks
+          ? item.getAttribute?.("data-notebook-id") ||
+            item.getAttribute?.("data-notebook") ||
+            item.dataset?.notebookId ||
+            item.dataset?.notebook
+          : "";
         const state = await this.resolveDocLockState(docId, {source: "search", notebookId});
         if (token !== this.searchRefreshToken) return;
         locked = state.locked;
@@ -1832,6 +2006,7 @@ class UiLockGuardPlugin extends Plugin {
       this.docTreeRefreshTimer = null;
       this.refreshDocTreeMarks();
       this.collapseLockedNotebooks();
+      this.collapseLockedDocs();
     }, 80);
   }
 
@@ -2049,12 +2224,17 @@ class UiLockGuardPlugin extends Plugin {
       overlay.dataset.lockReason = state.reason || "";
       overlay.dataset.lockNotebookTitle = state.notebookTitle || "";
       overlay.dataset.lockNotebookId = state.notebookId || "";
+      overlay.dataset.lockAncestorTitle = state.ancestorTitle || "";
+      overlay.dataset.lockAncestorId = state.ancestorId || "";
       const titleEl = overlay.querySelector("[data-lock-title]");
       const subEl = overlay.querySelector("[data-lock-sub]");
       if (titleEl) titleEl.textContent = this.t("overlay.lockedTitle");
       if (subEl) {
         if (state.reason === "notebook" && state.notebookTitle) {
           subEl.textContent = this.t("overlay.notebookLockedWithName", {name: state.notebookTitle});
+        } else if (state.reason === "ancestor") {
+          const name = state.ancestorTitle || state.lock?.title || state.lock?.id || "";
+          subEl.textContent = this.t("overlay.docAncestorLockedWithName", {name});
         } else {
           subEl.textContent =
             state.reason === "notebook" ? this.t("overlay.notebookLocked") : this.t("overlay.docLocked");
@@ -2066,6 +2246,8 @@ class UiLockGuardPlugin extends Plugin {
       overlay.dataset.lockReason = "";
       overlay.dataset.lockNotebookTitle = "";
       overlay.dataset.lockNotebookId = "";
+      overlay.dataset.lockAncestorTitle = "";
+      overlay.dataset.lockAncestorId = "";
     }
   }
 
@@ -2111,8 +2293,13 @@ class UiLockGuardPlugin extends Plugin {
       if (lock) {
         const reason = overlay.dataset.lockReason || "";
         const notebookTitle = overlay.dataset.lockNotebookTitle || lock.title || lock.id;
-        const hint =
-          reason === "notebook" ? this.t("unlock.hintNotebook", {name: notebookTitle || lock.id}) : "";
+        const ancestorTitle = overlay.dataset.lockAncestorTitle || lock.title || lock.id;
+        let hint = "";
+        if (reason === "notebook") {
+          hint = this.t("unlock.hintNotebook", {name: notebookTitle || lock.id});
+        } else if (reason === "ancestor") {
+          hint = this.t("unlock.hintDocAncestor", {name: ancestorTitle || lock.id});
+        }
         void this.unlockLock(lock, {hint});
       }
     });
@@ -2139,6 +2326,8 @@ class UiLockGuardPlugin extends Plugin {
         overlay.dataset.lockReason = "";
         overlay.dataset.lockNotebookTitle = "";
         overlay.dataset.lockNotebookId = "";
+        overlay.dataset.lockAncestorTitle = "";
+        overlay.dataset.lockAncestorId = "";
       }
     }
   }
@@ -2377,37 +2566,85 @@ class UiLockGuardPlugin extends Plugin {
     const inDocTree = this.docTreeContainer?.isConnected && this.docTreeContainer.contains(item);
     if (!inDocTree && !isProbablyDocTreeItem(item)) return false;
     const info = resolveTreeItemInfo(item);
-    if (!info.isNotebook) return false;
-    const match = this.resolveNotebookLockForTreeItem(item);
-    const lock = match?.lock || null;
-    if (!lock || !this.isLockedNow(lock)) return false;
-
     const now = nowTs();
     const threshold = isMobileClient() ? 800 : 400;
-    if (this.lastNotebookUnlock.id === lock.id && now - this.lastNotebookUnlock.time < threshold) {
+    if (info.isNotebook) {
+      const match = this.resolveNotebookLockForTreeItem(item);
+      const lock = match?.lock || null;
+      if (!lock || !this.isLockedNow(lock)) return false;
+
+      if (this.lastNotebookUnlock.id === lock.id && now - this.lastNotebookUnlock.time < threshold) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        return true;
+      }
+      this.lastNotebookUnlock = {id: lock.id, time: now};
+
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
+      this.collapseNotebookTreeItem(item);
+
+      const deferDialog = options.deferDialog && isMobileClient();
+      if (deferDialog) {
+        setTimeout(() => {
+          void this.unlockLock(lock).then((ok) => {
+            if (ok) this.expandNotebookInTree(item);
+          });
+        }, 0);
+        return true;
+      }
+
+      const ok = await this.unlockLock(lock);
+      if (ok) {
+        this.expandNotebookInTree(item);
+      }
       return true;
     }
-    this.lastNotebookUnlock = {id: lock.id, time: now};
+
+    if (!info.id || !isTreeToggleTarget(target, item)) return false;
 
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
+
+    const toggleKey = `doc:${info.id}`;
+    if (this.lastDocUnlock.key === toggleKey && now - this.lastDocUnlock.time < threshold) {
+      return true;
+    }
+    this.lastDocUnlock = {key: toggleKey, time: now};
+
+    const notebookId = getNotebookIdFromTreeItem(item);
+    const state = await this.resolveDocLockState(info.id, {source: "tree", notebookId});
+    const lock = state?.lock || null;
+    if (!lock || !state.locked) {
+      this.tryToggleTree(item);
+      return true;
+    }
+
     this.collapseNotebookTreeItem(item);
+
+    const notebookTitle = state.notebookTitle || lock.title || lock.id;
+    const ancestorTitle = state.ancestorTitle || lock.title || lock.id;
+    let hint = "";
+    if (state.reason === "notebook") {
+      hint = this.t("unlock.hintNotebook", {name: notebookTitle || lock.id});
+    } else if (state.reason === "ancestor") {
+      hint = this.t("unlock.hintDocAncestor", {name: ancestorTitle || lock.id});
+    }
 
     const deferDialog = options.deferDialog && isMobileClient();
     if (deferDialog) {
       setTimeout(() => {
-        void this.unlockLock(lock).then((ok) => {
+        void this.unlockLock(lock, {hint}).then((ok) => {
           if (ok) this.expandNotebookInTree(item);
         });
       }, 0);
       return true;
     }
 
-    const ok = await this.unlockLock(lock);
+    const ok = await this.unlockLock(lock, {hint});
     if (ok) {
       this.expandNotebookInTree(item);
     }
@@ -2438,6 +2675,11 @@ class UiLockGuardPlugin extends Plugin {
           : item.closest?.(".b3-list-item");
       this.collapseNotebookTreeItem(treeItem);
     });
+  }
+
+  collapseDocInTree(docId) {
+    if (!docId) return;
+    this.collapseNotebookInTree(docId);
   }
 
   collapseNotebookTreeItem(treeItem) {
@@ -2491,6 +2733,34 @@ class UiLockGuardPlugin extends Plugin {
         if (!info.isNotebook) return;
         const match = this.resolveNotebookLockForTreeItem(item);
         if (match?.lock && this.isLockedNow(match.lock)) {
+          this.collapseNotebookTreeItem(item);
+        }
+      });
+    };
+
+    if (hasTreeRoot) {
+      applyCollapse(this.docTreeContainer, false);
+      applyCollapse(document, true);
+      return;
+    }
+    applyCollapse(document, true);
+  }
+
+  collapseLockedDocs() {
+    const hasTreeRoot = this.docTreeContainer && this.docTreeContainer.isConnected;
+    const applyCollapse = (scope, requireFilter) => {
+      let items = scope.querySelectorAll(".b3-list-item");
+      if (!items.length) {
+        items = scope.querySelectorAll("[data-type^='navigation'], [data-type*='navigation'], [data-type='notebook']");
+      }
+      items.forEach((rawItem) => {
+        const item =
+          rawItem.classList?.contains("b3-list-item") ? rawItem : rawItem.closest?.(".b3-list-item") || rawItem;
+        if (requireFilter && !isProbablyDocTreeItem(item)) return;
+        const info = resolveTreeItemInfo(item);
+        if (info.isNotebook || !info.id) return;
+        const lock = this.getLock("doc", info.id);
+        if (lock && this.isLockedNow(lock)) {
           this.collapseNotebookTreeItem(item);
         }
       });
@@ -2778,6 +3048,9 @@ class UiLockGuardPlugin extends Plugin {
     if (type === "notebook") {
       this.collapseNotebookInTree(id);
       this.collapseLockedNotebooks();
+    } else if (type === "doc") {
+      this.collapseDocInTree(id);
+      this.collapseLockedDocs();
     }
     showMessage(this.t("lock.lockedSuccess"));
   }

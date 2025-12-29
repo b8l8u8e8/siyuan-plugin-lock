@@ -9,10 +9,10 @@ Provides locking mechanisms for SiYuan Note notebooks and documents. Supports pa
 - **Document/Notebook Locking**: Supports password or 3x3 gesture patterns.
 - **Locking Strategy**: Supports default lock on restart and custom auto-relock after N minutes of trusted duration.
 - **Notebook Lock Behavior**: The document tree automatically collapses and requires unlocking to expand; locked documents display a lock icon and a trust countdown (countdown display can be disabled).
-- **Document Lock Behavior**: Content is masked when opening a document; if the lock originates from a notebook (i.e., the document itself is unlocked but its parent notebook is locked), the specific notebook name is indicated.
-- **Global Search Protection**: Matched content in global search is replaced with lock hint text, retaining only the title and document path; the preview area is locked to prevent viewing locked documents via search directly.
+- **Document Lock Behavior**: Document locks apply to descendants; content is masked when opening a document; locked documents in the tree cannot expand and require unlocking; if the lock originates from a parent document or notebook, the specific name is indicated.
+- **Global Search Protection**: Matched content in global search is replaced with lock hint text, retaining only the title and document path; the preview area is locked, and locks from the document itself, parent documents, or notebooks all apply.
 - **Global Search Visibility Toggle**: An "eye" button in the global search toolbar toggles whether to show or hide search results from locked documents.
-- **File History Protection**: The file history preview area is locked, requiring unlocking to view historical content, preventing unauthorized access via file history.
+- **File History Protection**: The file history preview area is locked, requiring unlocking when the document or its parent document/notebook is locked.
 - **Lock Management Panel**: The plugin settings page displays all locked objects, allowing for unlocking or deletion.
 - **Inactivity Auto-Lock Screen**: Triggers the lock screen after X minutes of no operation, with support for a floating ball/top bar countdown.
 
