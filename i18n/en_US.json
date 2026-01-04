@@ -1,6 +1,7 @@
 {
   "menu.lock": "Lock",
   "menu.unlock": "Unlock",
+  "menu.lockNow": "Lock",
   "menu.removeLock": "Remove Lock",
   "overlay.lockedTitle": "Locked",
   "overlay.docLocked": "This note is locked",
@@ -18,6 +19,7 @@
   "lock.stepCancel": "Cancel",
   "lock.setPassword": "Set password",
   "lock.confirmPassword": "Confirm password",
+  "lock.hintPlaceholder": "Password hint (optional)",
   "lock.passwordHint": "No length limit",
   "lock.drawPattern": "Draw pattern",
   "lock.drawAgain": "Draw again to confirm",
@@ -40,6 +42,7 @@
   "unlock.success": "Unlocked",
   "unlock.fail": "Verification failed",
   "unlock.alreadyUnlocked": "Already unlocked",
+  "unlock.passwordHint": "Password hint: {{hint}}",
   "unlock.hintDocAncestor": "This doc belongs to locked parent doc: {{name}}",
   "unlock.hintNotebook": "This doc belongs to locked notebook: {{name}}",
   "remove.dialogTitle": "Remove lock {{name}}",

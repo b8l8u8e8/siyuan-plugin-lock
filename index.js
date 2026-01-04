@@ -35,6 +35,7 @@ const DEFAULT_SETTINGS = {
   autoLockFloatYMobile: null,
   autoLockFloatByDevice: null,
   treeCountdownEnabled: true,
+  searchHideLockedEnabled: false,
 };
 const TOUCH_LISTENER_OPTIONS = {capture: true, passive: false};
 const DOC_SOURCE_TTL = 2500;
@@ -1187,7 +1188,12 @@ class UiLockGuardPlugin extends Plugin {
         typeof settings.treeCountdownEnabled === "boolean"
           ? settings.treeCountdownEnabled
           : DEFAULT_SETTINGS.treeCountdownEnabled,
+      searchHideLockedEnabled:
+        typeof settings.searchHideLockedEnabled === "boolean"
+          ? settings.searchHideLockedEnabled
+          : DEFAULT_SETTINGS.searchHideLockedEnabled,
     };
+    this.searchHideLockedEnabled = !!this.settings.searchHideLockedEnabled;
 
     this.normalizeLocks();
     this.scheduleAllTrustTimers();
@@ -1198,6 +1204,7 @@ class UiLockGuardPlugin extends Plugin {
     this.applyAutoLockSettings();
     this.renderSettingLockList();
     this.syncSettingInputs();
+    this.scheduleSearchRefresh();
   }
 
   normalizeLocks() {
@@ -1207,6 +1214,7 @@ class UiLockGuardPlugin extends Plugin {
         type: lock.type === "notebook" ? "notebook" : "doc",
         title: lock.title || "",
         lockType: lock.lockType === "pattern" ? "pattern" : "password",
+        hint: typeof lock.hint === "string" ? lock.hint : "",
         salt: lock.salt || "",
         hash: lock.hash || "",
         policy: lock.policy === "trust" ? "trust" : "always",
@@ -1606,7 +1614,7 @@ class UiLockGuardPlugin extends Plugin {
       }
       if (panelActive && !this.searchPanelActive) {
         this.searchPanelActive = true;
-        this.searchHideLockedEnabled = false;
+        this.searchHideLockedEnabled = !!this.settings.searchHideLockedEnabled;
         this.searchHiddenCount = 0;
         this.searchToggleNoticePending = false;
       }
@@ -1648,7 +1656,6 @@ class UiLockGuardPlugin extends Plugin {
     }
     this.searchListContainer = null;
     if (reset) {
-      this.searchHideLockedEnabled = false;
       this.searchHiddenCount = 0;
       this.searchToggleNoticePending = false;
       if (this.searchToggleEl && !this.searchToggleEl.isConnected) {
@@ -1775,6 +1782,11 @@ class UiLockGuardPlugin extends Plugin {
     this.searchToggleEl = btn;
     this.searchHideLockedEnabled = !this.searchHideLockedEnabled;
     this.searchToggleNoticePending = this.searchHideLockedEnabled;
+    this.settings = {
+      ...this.settings,
+      searchHideLockedEnabled: this.searchHideLockedEnabled,
+    };
+    void this.saveSettings();
     this.updateSearchToggleUI();
     this.scheduleSearchRefresh();
   };
@@ -2511,11 +2523,19 @@ class UiLockGuardPlugin extends Plugin {
           click: () => void this.openLockDialog({id, type: itemType, title, element: targetEl}),
         });
       } else {
-        menu.addItem({
-          icon: "iconUnlock",
-          label: this.t("menu.unlock"),
-          click: () => void this.unlockLock(lock),
-        });
+        if (this.isLockedNow(lock)) {
+          menu.addItem({
+            icon: "iconUnlock",
+            label: this.t("menu.unlock"),
+            click: () => void this.unlockLock(lock),
+          });
+        } else {
+          menu.addItem({
+            icon: LOCK_ICON_ID,
+            label: this.t("menu.lockNow"),
+            click: () => void this.relockLock(lock),
+          });
+        }
         menu.addItem({
           icon: "iconTrashcan",
           label: this.t("menu.removeLock"),
@@ -2827,6 +2847,10 @@ class UiLockGuardPlugin extends Plugin {
               </div>
               <div class="ui-lock-guard__hint" data-pattern-status>${this.t("lock.drawPattern")}</div>
             </div>
+            <div style="height: 8px;"></div>
+            <input class="b3-text-field fn__block" type="text" data-hint placeholder="${this.t(
+              "lock.hintPlaceholder",
+            )}" />
           </div>
           <div class="ui-lock-guard__step" data-step="3">
             <div class="ui-lock-guard__step-title">${this.t("lock.choosePolicy")}</div>
@@ -2865,6 +2889,7 @@ class UiLockGuardPlugin extends Plugin {
     const passwordInput = root.querySelector("[data-password]");
     const passwordConfirm = root.querySelector("[data-password-confirm]");
     const patternStatus = root.querySelector("[data-pattern-status]");
+    const hintInput = root.querySelector("[data-hint]");
     const policyInputs = Array.from(root.querySelectorAll("input[name='ui-lock-guard-policy']"));
     const trustInputWrap = root.querySelector("[data-trust-input]");
     const trustMinutesInput = trustInputWrap?.querySelector("input");
@@ -2878,6 +2903,7 @@ class UiLockGuardPlugin extends Plugin {
       step: 1,
       lockType: "",
       secret: "",
+      hint: "",
       policy: "always",
       trustMinutes: 30,
     };
@@ -2913,6 +2939,7 @@ class UiLockGuardPlugin extends Plugin {
       patternWrap.style.display = state.lockType === "pattern" ? "" : "none";
       if (passwordInput) passwordInput.value = "";
       if (passwordConfirm) passwordConfirm.value = "";
+      if (hintInput) hintInput.value = state.hint || "";
       state.secret = "";
       updateSteps();
     };
@@ -2989,6 +3016,7 @@ class UiLockGuardPlugin extends Plugin {
     btnSave?.addEventListener("click", async () => {
       const trustVal = clampInt(trustMinutesInput?.value, 1, 1440, 30);
       state.trustMinutes = trustVal;
+      state.hint = String(hintInput?.value || "").trim();
       if (!state.lockType || !state.secret) {
         showMessage(this.t("lock.secretRequired"));
         return;
@@ -3000,6 +3028,7 @@ class UiLockGuardPlugin extends Plugin {
         title: name,
         lockType: state.lockType,
         secret: state.secret,
+        hint: state.hint,
         policy,
         trustMinutes: trustVal,
       });
@@ -3017,13 +3046,16 @@ class UiLockGuardPlugin extends Plugin {
       const val = clampInt(trustMinutesInput.value, 1, 1440, 30);
       if (trustHint) trustHint.textContent = this.t("lock.trustMinutesHint", {min: val});
     });
+    hintInput?.addEventListener("input", () => {
+      state.hint = String(hintInput.value || "");
+    });
 
     updateTypeCards();
     updatePolicyUI();
     updateSteps();
   }
 
-  async createLockRecord({id, type, title, lockType, secret, policy, trustMinutes}) {
+  async createLockRecord({id, type, title, lockType, secret, hint, policy, trustMinutes}) {
     const {salt, hash} = await hashSecret(secret);
     const now = nowTs();
     const newLock = {
@@ -3031,6 +3063,7 @@ class UiLockGuardPlugin extends Plugin {
       type,
       title: title || "",
       lockType,
+      hint: String(hint || ""),
       salt,
       hash,
       policy,
@@ -3070,6 +3103,7 @@ class UiLockGuardPlugin extends Plugin {
         content: `
           <div class="ui-lock-guard__dialog">
             <div class="ui-lock-guard__step-title">${escapeHtml(hint || "")}</div>
+            <div class="ui-lock-guard__hint" data-verify-hint style="display:none;"></div>
             <div data-verify-password style="display:none;">
               <input class="b3-text-field fn__block" type="password" placeholder="${this.t("unlock.enterPassword")}" />
             </div>
@@ -3105,9 +3139,19 @@ class UiLockGuardPlugin extends Plugin {
       const verifyBtn = root.querySelector("[data-action='verify']");
       const cancelBtn = root.querySelector("[data-action='cancel']");
       const statusEl = root.querySelector("[data-verify-status]");
+      const verifyHintEl = root.querySelector("[data-verify-hint]");
       const passwordInput = passwordWrap?.querySelector("input");
 
       let secret = "";
+      const passwordHint = typeof lock.hint === "string" ? lock.hint.trim() : "";
+      if (verifyHintEl) {
+        if (passwordHint) {
+          verifyHintEl.textContent = this.t("unlock.passwordHint", {hint: passwordHint});
+          verifyHintEl.style.display = "";
+        } else {
+          verifyHintEl.style.display = "none";
+        }
+      }
 
       const doVerify = async () => {
         if (!secret) return;
@@ -3190,6 +3234,39 @@ class UiLockGuardPlugin extends Plugin {
     this.renderSettingLockList();
     showMessage(this.t("unlock.success"));
     return true;
+  }
+
+  async relockLock(lock) {
+    if (!lock) return;
+    if (this.isLockedNow(lock)) return;
+    const key = makeLockKey(lock.type, lock.id);
+    let changed = false;
+    if (lock.policy === "trust") {
+      if (lock.trustUntil) {
+        lock.trustUntil = 0;
+        lock.updatedAt = nowTs();
+        changed = true;
+      }
+      const timer = this.trustTimers.get(key);
+      if (timer) clearTimeout(timer);
+      this.trustTimers.delete(key);
+      if (changed) {
+        await this.saveLocks();
+      }
+    } else if (this.sessionUnlocks.has(key)) {
+      this.sessionUnlocks.delete(key);
+      changed = true;
+    }
+    if (!changed) return;
+    this.refreshDocTreeMarks();
+    this.refreshAllProtyles();
+    this.renderSettingLockList();
+    if (lock.type === "notebook") {
+      this.collapseNotebookInTree(lock.id);
+    } else if (lock.type === "doc") {
+      this.collapseDocInTree(lock.id);
+    }
+    showMessage(this.t("lock.lockedSuccess"));
   }
 
   async removeLock(lock) {

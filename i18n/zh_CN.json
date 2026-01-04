@@ -1,6 +1,7 @@
 {
   "menu.lock": "加锁",
   "menu.unlock": "解锁",
+  "menu.lockNow": "锁定",
   "menu.removeLock": "删除锁",
   "overlay.lockedTitle": "已锁定",
   "overlay.docLocked": "该文档已加锁",
@@ -18,6 +19,7 @@
   "lock.stepCancel": "取消",
   "lock.setPassword": "设置密码",
   "lock.confirmPassword": "确认密码",
+  "lock.hintPlaceholder": "密码提示（可选）",
   "lock.passwordHint": "密码不限长度",
   "lock.drawPattern": "绘制手势",
   "lock.drawAgain": "请再次绘制确认",
@@ -40,6 +42,7 @@
   "unlock.success": "解锁成功",
   "unlock.fail": "验证失败",
   "unlock.alreadyUnlocked": "已处于解锁状态",
+  "unlock.passwordHint": "密码提示：{{hint}}",
   "unlock.hintDocAncestor": "此文档隶属于已加锁的上级文档：{{name}}",
   "unlock.hintNotebook": "此文档隶属于已加锁的笔记本：{{name}}",
   "remove.dialogTitle": "删除锁 {{name}}",
