@@ -37,6 +37,7 @@ const DEFAULT_SETTINGS = {
   treeCountdownEnabled: true,
   searchHideLockedEnabled: false,
 };
+const DEFAULT_TIMER_MINUTES = 60;
 const TOUCH_LISTENER_OPTIONS = {capture: true, passive: false};
 const DOC_SOURCE_TTL = 2500;
 
@@ -54,6 +55,16 @@ const SEARCH_HIDE_ICON_SVG = `<symbol id="${SEARCH_HIDE_ICON_ID}" viewBox="0 0 2
 </symbol>`;
 
 function nowTs() {
+  return Date.now();
+}
+
+function monotonicMs() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  if (typeof process !== "undefined" && typeof process.uptime === "function") {
+    return process.uptime() * 1000;
+  }
   return Date.now();
 }
 
@@ -1033,6 +1044,7 @@ class UiLockGuardPlugin extends Plugin {
     this.settings = {...DEFAULT_SETTINGS};
     this.sessionUnlocks = new Set();
     this.trustTimers = new Map();
+    this.timerAnchors = new Map();
     this.protyleOverlays = new Map();
     this.docToNotebookCache = new Map();
     this.docAncestorCache = new Map();
@@ -1068,6 +1080,9 @@ class UiLockGuardPlugin extends Plugin {
     this.setting = null;
     this.settingLockTick = null;
     this.treeTrustTick = null;
+    this.timerTick = null;
+    this.timerPersistAt = 0;
+    this.timerFlushBusy = false;
     this.settingEls = {
       autoEnable: null,
       autoMinutes: null,
@@ -1112,6 +1127,9 @@ class UiLockGuardPlugin extends Plugin {
     this.stopAutoLock();
     this.stopSettingLockTick();
     this.stopTreeTrustTick();
+    this.stopTimerTick();
+    void this.flushTimerElapsed();
+    this.clearTimerAnchors();
     if (this.docTreeBindTimer) {
       clearInterval(this.docTreeBindTimer);
       this.docTreeBindTimer = null;
@@ -1197,6 +1215,7 @@ class UiLockGuardPlugin extends Plugin {
 
     this.normalizeLocks();
     this.scheduleAllTrustTimers();
+    this.scheduleAllTimerLocks();
     this.refreshDocTreeMarks();
     this.collapseLockedNotebooks();
     this.collapseLockedDocs();
@@ -1217,9 +1236,11 @@ class UiLockGuardPlugin extends Plugin {
         hint: typeof lock.hint === "string" ? lock.hint : "",
         salt: lock.salt || "",
         hash: lock.hash || "",
-        policy: lock.policy === "trust" ? "trust" : "always",
+        policy: lock.policy === "trust" ? "trust" : lock.policy === "timer" ? "timer" : "always",
         trustMinutes: clampInt(lock.trustMinutes, 1, 1440, 30),
         trustUntil: clampInt(lock.trustUntil, 0, Number.MAX_SAFE_INTEGER, 0),
+        timerMinutes: clampInt(lock.timerMinutes, 1, 1440, DEFAULT_TIMER_MINUTES),
+        timerElapsedMs: clampInt(lock.timerElapsedMs, 0, Number.MAX_SAFE_INTEGER, 0),
         createdAt: clampInt(lock.createdAt, 0, Number.MAX_SAFE_INTEGER, nowTs()),
         updatedAt: clampInt(lock.updatedAt, 0, Number.MAX_SAFE_INTEGER, nowTs()),
       }))
@@ -1251,6 +1272,14 @@ class UiLockGuardPlugin extends Plugin {
 
   isLockedNow(lock) {
     if (!lock) return false;
+    if (lock.policy === "timer") {
+      const remaining = this.getTimerRemainingMs(lock);
+      if (remaining <= 0) {
+        void this.expireTimerLock(lock);
+        return false;
+      }
+      return true;
+    }
     if (lock.policy === "trust") {
       return !(lock.trustUntil && lock.trustUntil > nowTs());
     }
@@ -1509,6 +1538,154 @@ class UiLockGuardPlugin extends Plugin {
     } else if (lock.type === "doc") {
       this.collapseDocInTree(lock.id);
     }
+  }
+
+  scheduleAllTimerLocks() {
+    this.clearTimerAnchors();
+    const hasTimer = this.locks.some((lock) => lock.policy === "timer");
+    if (hasTimer) {
+      this.startTimerTick();
+    } else {
+      this.stopTimerTick();
+    }
+  }
+
+  scheduleTimerLock(lock) {
+    if (!lock || lock.policy !== "timer") return;
+    this.getTimerAnchor(lock);
+    this.startTimerTick();
+  }
+
+  clearTimerAnchors() {
+    this.timerAnchors.clear();
+  }
+
+  getTimerTotalMs(lock) {
+    if (!lock) return 0;
+    return clampInt(lock.timerMinutes, 1, 1440, DEFAULT_TIMER_MINUTES) * 60 * 1000;
+  }
+
+  getTimerAnchor(lock) {
+    const key = makeLockKey(lock.type, lock.id);
+    let anchor = this.timerAnchors.get(key);
+    if (!anchor) {
+      anchor = {
+        baseElapsed: clampInt(lock.timerElapsedMs, 0, Number.MAX_SAFE_INTEGER, 0),
+        monoStart: monotonicMs(),
+      };
+      this.timerAnchors.set(key, anchor);
+    }
+    return anchor;
+  }
+
+  getTimerElapsedMs(lock, nowMono = monotonicMs()) {
+    if (!lock) return 0;
+    const anchor = this.getTimerAnchor(lock);
+    const delta = Math.max(0, nowMono - anchor.monoStart);
+    return anchor.baseElapsed + delta;
+  }
+
+  getTimerRemainingMs(lock, nowMono = monotonicMs()) {
+    if (!lock || lock.policy !== "timer") return 0;
+    const total = this.getTimerTotalMs(lock);
+    if (!total) return 0;
+    const elapsed = this.getTimerElapsedMs(lock, nowMono);
+    return Math.max(0, total - elapsed);
+  }
+
+  syncTimerElapsed(lock, nowMono = monotonicMs()) {
+    if (!lock || lock.policy !== "timer") return;
+    const key = makeLockKey(lock.type, lock.id);
+    const total = this.getTimerTotalMs(lock);
+    const elapsed = Math.min(total, Math.max(0, Math.round(this.getTimerElapsedMs(lock, nowMono))));
+    lock.timerElapsedMs = elapsed;
+    const anchor = this.timerAnchors.get(key);
+    if (anchor) {
+      anchor.baseElapsed = elapsed;
+      anchor.monoStart = nowMono;
+    }
+  }
+
+  async flushTimerElapsed(nowMono = monotonicMs()) {
+    if (this.timerFlushBusy) return;
+    this.timerFlushBusy = true;
+    let changed = false;
+    for (const lock of this.locks) {
+      if (lock.policy !== "timer") continue;
+      const before = clampInt(lock.timerElapsedMs, 0, Number.MAX_SAFE_INTEGER, 0);
+      this.syncTimerElapsed(lock, nowMono);
+      if (lock.timerElapsedMs !== before) changed = true;
+    }
+    try {
+      if (changed) await this.saveLocks();
+    } finally {
+      this.timerFlushBusy = false;
+    }
+  }
+
+  async expireTimerLock(lock) {
+    if (!lock || lock.policy !== "timer") return;
+    if (!this.getLock(lock.type, lock.id)) return;
+    const key = makeLockKey(lock.type, lock.id);
+    this.locks = this.locks.filter((item) => !(item.id === lock.id && item.type === lock.type));
+    this.sessionUnlocks.delete(key);
+    this.timerAnchors.delete(key);
+    await this.saveLocks();
+    this.clearOverlaysForLock(lock);
+    this.refreshDocTreeMarks();
+    this.refreshAllProtyles();
+    this.renderSettingLockList();
+  }
+
+  tickTimerLocks() {
+    const nowMono = monotonicMs();
+    let hasTimer = false;
+    const expired = [];
+    for (const lock of this.locks) {
+      if (lock.policy !== "timer") continue;
+      hasTimer = true;
+      if (this.getTimerRemainingMs(lock, nowMono) <= 0) {
+        expired.push(lock);
+      }
+    }
+    if (!hasTimer) {
+      this.stopTimerTick();
+      return;
+    }
+    this.updateTimerOverlayTexts(nowMono);
+    if (!this.timerPersistAt || nowMono - this.timerPersistAt >= 15000) {
+      this.timerPersistAt = nowMono;
+      void this.flushTimerElapsed(nowMono);
+    }
+    if (expired.length) {
+      expired.forEach((lock) => void this.expireTimerLock(lock));
+    }
+  }
+
+  updateTimerOverlayTexts(nowMono = monotonicMs()) {
+    for (const overlay of this.protyleOverlays.values()) {
+      if (!overlay || !overlay.isConnected) continue;
+      if (!overlay.classList.contains("ui-lock-guard__overlay--show")) continue;
+      const key = overlay.dataset.lockKey || "";
+      const lock = this.getLockByKey(key);
+      if (!lock || lock.policy !== "timer") continue;
+      const subEl = overlay.querySelector("[data-lock-sub]");
+      if (!subEl) continue;
+      const remaining = this.getTimerRemainingMs(lock, nowMono);
+      const text = this.t("overlay.timerRemaining", {time: formatDuration(remaining)});
+      if (subEl.textContent !== text) subEl.textContent = text;
+    }
+  }
+
+  startTimerTick() {
+    if (this.timerTick) return;
+    this.timerTick = setInterval(() => this.tickTimerLocks(), 1000);
+  }
+
+  stopTimerTick() {
+    if (!this.timerTick) return;
+    clearInterval(this.timerTick);
+    this.timerTick = null;
   }
 
   bindDocTreeLater() {
@@ -2046,6 +2223,7 @@ class UiLockGuardPlugin extends Plugin {
     }
     const hasTreeRoot = this.docTreeContainer && this.docTreeContainer.isConnected;
     const now = nowTs();
+    const nowMono = monotonicMs();
     let hasTrustLock = false;
     const applyMarks = (scope, requireFilter) => {
       let items = scope.querySelectorAll(".b3-list-item");
@@ -2086,8 +2264,8 @@ class UiLockGuardPlugin extends Plugin {
           }
           const countdown = titleEl.querySelector(".ui-lock-guard__tree-countdown");
           const text =
-            activeLock && activeLock.policy === "trust" && this.settings.treeCountdownEnabled
-              ? this.formatTreeTrustCountdown(activeLock, now)
+            activeLock && this.settings.treeCountdownEnabled
+              ? this.formatTreeTrustCountdown(activeLock, now, nowMono)
               : "";
           if (text) {
             hasTrustLock = true;
@@ -2240,9 +2418,18 @@ class UiLockGuardPlugin extends Plugin {
       overlay.dataset.lockAncestorId = state.ancestorId || "";
       const titleEl = overlay.querySelector("[data-lock-title]");
       const subEl = overlay.querySelector("[data-lock-sub]");
+      const actionBtn = overlay.querySelector("[data-action='unlock']");
       if (titleEl) titleEl.textContent = this.t("overlay.lockedTitle");
+      if (actionBtn) {
+        const isTimer = state.lock?.policy === "timer";
+        actionBtn.style.display = isTimer ? "none" : "";
+        actionBtn.disabled = isTimer;
+      }
       if (subEl) {
-        if (state.reason === "notebook" && state.notebookTitle) {
+        if (state.lock?.policy === "timer") {
+          const remaining = this.getTimerRemainingMs(state.lock);
+          subEl.textContent = this.t("overlay.timerRemaining", {time: formatDuration(remaining)});
+        } else if (state.reason === "notebook" && state.notebookTitle) {
           subEl.textContent = this.t("overlay.notebookLockedWithName", {name: state.notebookTitle});
         } else if (state.reason === "ancestor") {
           const name = state.ancestorTitle || state.lock?.title || state.lock?.id || "";
@@ -2260,6 +2447,11 @@ class UiLockGuardPlugin extends Plugin {
       overlay.dataset.lockNotebookId = "";
       overlay.dataset.lockAncestorTitle = "";
       overlay.dataset.lockAncestorId = "";
+      const actionBtn = overlay.querySelector("[data-action='unlock']");
+      if (actionBtn) {
+        actionBtn.style.display = "";
+        actionBtn.disabled = false;
+      }
     }
   }
 
@@ -2867,6 +3059,14 @@ class UiLockGuardPlugin extends Plugin {
                 <input class="b3-text-field fn__block" type="number" min="1" max="1440" step="1" value="30" />
                 <div class="ui-lock-guard__hint">${this.t("lock.trustMinutesHint", {min: 30})}</div>
               </div>
+              <label class="ui-lock-guard__policy-item">
+                <input type="radio" name="ui-lock-guard-policy" value="timer" />
+                <span>${this.t("lock.policyTimer")}</span>
+              </label>
+              <div data-timer-input style="display:none;">
+                <input class="b3-text-field fn__block" type="number" min="1" max="1440" step="1" value="${DEFAULT_TIMER_MINUTES}" />
+                <div class="ui-lock-guard__hint">${this.t("lock.timerMinutesHint", {min: DEFAULT_TIMER_MINUTES})}</div>
+              </div>
             </div>
           </div>
           <div class="ui-lock-guard__dialog-actions">
@@ -2894,6 +3094,9 @@ class UiLockGuardPlugin extends Plugin {
     const trustInputWrap = root.querySelector("[data-trust-input]");
     const trustMinutesInput = trustInputWrap?.querySelector("input");
     const trustHint = trustInputWrap?.querySelector(".ui-lock-guard__hint");
+    const timerInputWrap = root.querySelector("[data-timer-input]");
+    const timerMinutesInput = timerInputWrap?.querySelector("input");
+    const timerHint = timerInputWrap?.querySelector(".ui-lock-guard__hint");
     const btnBack = root.querySelector("[data-action='back']");
     const btnNext = root.querySelector("[data-action='next']");
     const btnSave = root.querySelector("[data-action='save']");
@@ -2906,6 +3109,7 @@ class UiLockGuardPlugin extends Plugin {
       hint: "",
       policy: "always",
       trustMinutes: 30,
+      timerMinutes: DEFAULT_TIMER_MINUTES,
     };
 
     const updateSteps = () => {
@@ -2945,7 +3149,8 @@ class UiLockGuardPlugin extends Plugin {
     };
 
     const updatePolicyUI = () => {
-      trustInputWrap.style.display = state.policy === "trust" ? "" : "none";
+      if (trustInputWrap) trustInputWrap.style.display = state.policy === "trust" ? "" : "none";
+      if (timerInputWrap) timerInputWrap.style.display = state.policy === "timer" ? "" : "none";
     };
 
     const setPatternStatus = (code) => {
@@ -3015,13 +3220,19 @@ class UiLockGuardPlugin extends Plugin {
 
     btnSave?.addEventListener("click", async () => {
       const trustVal = clampInt(trustMinutesInput?.value, 1, 1440, 30);
+      const timerVal = clampInt(timerMinutesInput?.value, 1, 1440, DEFAULT_TIMER_MINUTES);
       state.trustMinutes = trustVal;
+      state.timerMinutes = timerVal;
       state.hint = String(hintInput?.value || "").trim();
       if (!state.lockType || !state.secret) {
         showMessage(this.t("lock.secretRequired"));
         return;
       }
       const policy = state.policy;
+      if (policy === "timer") {
+        const ok = await this.confirmTimerLock(timerVal);
+        if (!ok) return;
+      }
       await this.createLockRecord({
         id,
         type,
@@ -3031,6 +3242,7 @@ class UiLockGuardPlugin extends Plugin {
         hint: state.hint,
         policy,
         trustMinutes: trustVal,
+        timerMinutes: timerVal,
       });
       dialog.destroy();
     });
@@ -3046,6 +3258,10 @@ class UiLockGuardPlugin extends Plugin {
       const val = clampInt(trustMinutesInput.value, 1, 1440, 30);
       if (trustHint) trustHint.textContent = this.t("lock.trustMinutesHint", {min: val});
     });
+    timerMinutesInput?.addEventListener("input", () => {
+      const val = clampInt(timerMinutesInput.value, 1, 1440, DEFAULT_TIMER_MINUTES);
+      if (timerHint) timerHint.textContent = this.t("lock.timerMinutesHint", {min: val});
+    });
     hintInput?.addEventListener("input", () => {
       state.hint = String(hintInput.value || "");
     });
@@ -3055,7 +3271,48 @@ class UiLockGuardPlugin extends Plugin {
     updateSteps();
   }
 
-  async createLockRecord({id, type, title, lockType, secret, hint, policy, trustMinutes}) {
+  async confirmTimerLock(minutes) {
+    const text = this.t("lock.timerConfirmDesc", {min: minutes});
+    return new Promise((resolve) => {
+      let resolved = false;
+      const finalize = (value) => {
+        if (resolved) return;
+        resolved = true;
+        resolve(value);
+      };
+      const dialog = new Dialog({
+        title: this.t("lock.timerConfirmTitle"),
+        content: `
+          <div class="ui-lock-guard__dialog">
+            <div class="ui-lock-guard__hint">${escapeHtml(text)}</div>
+            <div class="ui-lock-guard__dialog-actions">
+              <button class="b3-button b3-button--outline" data-action="cancel">${this.t(
+                "lock.stepCancel",
+              )}</button>
+              <button class="b3-button b3-button--primary" data-action="confirm">${this.t(
+                "lock.timerConfirmAction",
+              )}</button>
+            </div>
+          </div>
+        `,
+        width: "min(420px, 92vw)",
+        destroyCallback: () => finalize(false),
+      });
+      const root = dialog.element.querySelector(".ui-lock-guard__dialog");
+      const btnCancel = root?.querySelector("[data-action='cancel']");
+      const btnConfirm = root?.querySelector("[data-action='confirm']");
+      btnCancel?.addEventListener("click", () => {
+        finalize(false);
+        dialog.destroy();
+      });
+      btnConfirm?.addEventListener("click", () => {
+        finalize(true);
+        dialog.destroy();
+      });
+    });
+  }
+
+  async createLockRecord({id, type, title, lockType, secret, hint, policy, trustMinutes, timerMinutes}) {
     const {salt, hash} = await hashSecret(secret);
     const now = nowTs();
     const newLock = {
@@ -3069,12 +3326,15 @@ class UiLockGuardPlugin extends Plugin {
       policy,
       trustMinutes: clampInt(trustMinutes, 1, 1440, 30),
       trustUntil: 0,
+      timerMinutes: clampInt(timerMinutes, 1, 1440, DEFAULT_TIMER_MINUTES),
+      timerElapsedMs: 0,
       createdAt: now,
       updatedAt: now,
     };
     this.locks = [...this.locks.filter((lock) => !(lock.id === id && lock.type === type)), newLock];
     await this.saveLocks();
     this.scheduleTrustTimer(newLock);
+    this.scheduleTimerLock(newLock);
     this.refreshDocTreeMarks();
     this.refreshAllProtyles();
     this.renderSettingLockList();
@@ -3210,6 +3470,15 @@ class UiLockGuardPlugin extends Plugin {
 
   async unlockLock(lock, options = {}) {
     if (!lock) return false;
+    if (lock.policy === "timer") {
+      const remaining = this.getTimerRemainingMs(lock);
+      if (remaining > 0) {
+        showMessage(this.t("unlock.timerLocked", {time: formatDuration(remaining)}));
+        return false;
+      }
+      await this.expireTimerLock(lock);
+      return true;
+    }
     if (!this.isLockedNow(lock) && lock.policy === "always") {
       showMessage(this.t("unlock.alreadyUnlocked"));
       return true;
@@ -3238,6 +3507,7 @@ class UiLockGuardPlugin extends Plugin {
 
   async relockLock(lock) {
     if (!lock) return;
+    if (lock.policy === "timer") return;
     if (this.isLockedNow(lock)) return;
     const key = makeLockKey(lock.type, lock.id);
     let changed = false;
@@ -3271,6 +3541,15 @@ class UiLockGuardPlugin extends Plugin {
 
   async removeLock(lock) {
     if (!lock) return;
+    if (lock.policy === "timer") {
+      const remaining = this.getTimerRemainingMs(lock);
+      if (remaining > 0) {
+        showMessage(this.t("remove.timerLocked", {time: formatDuration(remaining)}));
+        return false;
+      }
+      await this.expireTimerLock(lock);
+      return true;
+    }
     const ok = await this.verifyLock(lock, {
       title: this.t("remove.dialogTitle", {name: lock.title || lock.id}),
       hint: this.t("remove.verifyHint"),
@@ -3398,7 +3677,7 @@ class UiLockGuardPlugin extends Plugin {
     this.refreshDocTreeMarks();
   }
 
-  formatTrustInfo(lock, now = nowTs()) {
+  formatTrustInfo(lock, now = nowTs(), nowMono = monotonicMs()) {
     if (!lock) return this.t("misc.unknown");
     const key = makeLockKey(lock.type, lock.id);
     if (lock.policy === "trust") {
@@ -3409,17 +3688,35 @@ class UiLockGuardPlugin extends Plugin {
       }
       return this.t("settings.trustExpired");
     }
+    if (lock.policy === "timer") {
+      const remaining = this.getTimerRemainingMs(lock, nowMono);
+      if (remaining > 0) {
+        return this.t("settings.timerRemainingValue", {time: formatDuration(remaining)});
+      }
+      return this.t("settings.timerExpired");
+    }
     return this.sessionUnlocks.has(key) ? this.t("settings.sessionUnlocked") : this.t("settings.locked");
   }
 
-  formatTreeTrustCountdown(lock, now = nowTs()) {
-    if (!lock || lock.policy !== "trust") return "";
-    if (!lock.trustUntil || lock.trustUntil <= now) return "";
-    const remaining = lock.trustUntil - now;
+  formatTreeTrustCountdown(lock, now = nowTs(), nowMono = monotonicMs()) {
+    if (!lock) return "";
+    let remaining = 0;
+    let labelKey = "";
+    if (lock.policy === "trust") {
+      if (!lock.trustUntil || lock.trustUntil <= now) return "";
+      remaining = lock.trustUntil - now;
+      labelKey = "tree.trustCountdown";
+    } else if (lock.policy === "timer") {
+      remaining = this.getTimerRemainingMs(lock, nowMono);
+      if (remaining <= 0) return "";
+      labelKey = "tree.timerCountdown";
+    } else {
+      return "";
+    }
     const parts = getCountdownParts(remaining);
     const min = String(parts.minutes);
     const sec = String(parts.seconds).padStart(2, "0");
-    return this.t("tree.trustCountdown", {min, sec});
+    return this.t(labelKey, {min, sec});
   }
 
   updateTreeTrustCountdowns() {
@@ -3434,14 +3731,15 @@ class UiLockGuardPlugin extends Plugin {
       return;
     }
     const now = nowTs();
+    const nowMono = monotonicMs();
     nodes.forEach((node) => {
       const key = node.getAttribute("data-lock-key") || "";
       const lock = this.getLockByKey(key);
-      if (!lock || lock.policy !== "trust") {
+      if (!lock) {
         node.remove();
         return;
       }
-      const text = this.formatTreeTrustCountdown(lock, now);
+      const text = this.formatTreeTrustCountdown(lock, now, nowMono);
       if (!text) {
         node.remove();
         return;
@@ -3467,6 +3765,7 @@ class UiLockGuardPlugin extends Plugin {
       return;
     }
     const now = nowTs();
+    const nowMono = monotonicMs();
     const items = wrap.querySelectorAll("[data-lock-key]");
     items.forEach((item) => {
       const key = item.getAttribute("data-lock-key");
@@ -3474,7 +3773,7 @@ class UiLockGuardPlugin extends Plugin {
       if (!lock) return;
       const infoEl = item.querySelector("[data-trust-info]");
       if (!infoEl) return;
-      const trustInfo = this.formatTrustInfo(lock, now);
+      const trustInfo = this.formatTrustInfo(lock, now, nowMono);
       if (infoEl.textContent !== trustInfo) {
         infoEl.textContent = trustInfo;
       }
@@ -3502,7 +3801,8 @@ class UiLockGuardPlugin extends Plugin {
       return;
     }
     const now = nowTs();
-    const hasTrustLock = this.locks.some((lock) => lock.policy === "trust");
+    const nowMono = monotonicMs();
+    const hasTrustLock = this.locks.some((lock) => lock.policy === "trust" || lock.policy === "timer");
     wrap.innerHTML =
       headerHtml +
       this.locks
@@ -3518,8 +3818,14 @@ class UiLockGuardPlugin extends Plugin {
             ? `${this.t("settings.policyTrust")} (${this.t("settings.trustMinutes", {
                 min: lock.trustMinutes,
               })})`
-            : this.t("settings.policyAlways");
-        const trustInfo = this.formatTrustInfo(lock, now);
+            : lock.policy === "timer"
+              ? `${this.t("settings.policyTimer")} (${this.t("settings.timerMinutes", {
+                  min: lock.timerMinutes,
+                })})`
+              : this.t("settings.policyAlways");
+        const infoLabel = lock.policy === "timer" ? this.t("settings.timerRemainingLabel") : this.t("settings.trustUntil");
+        const trustInfo = this.formatTrustInfo(lock, now, nowMono);
+        const isTimerLock = lock.policy === "timer";
         return `
           <div class="ui-lock-guard__lock-item" data-lock-key="${escapeAttr(key)}">
             <div>
@@ -3528,15 +3834,15 @@ class UiLockGuardPlugin extends Plugin {
                 <span>${this.t("settings.type")}: ${escapeHtml(typeLabel)}</span>
                 <span>${this.t("settings.lockType")}: ${escapeHtml(lockTypeLabel)}</span>
                 <span>${this.t("settings.policy")}: ${escapeHtml(policyLabel)}</span>
-                <span>${this.t("settings.trustUntil")}: <span data-trust-info>${escapeHtml(trustInfo)}</span></span>
+                <span>${escapeHtml(infoLabel)}: <span data-trust-info>${escapeHtml(trustInfo)}</span></span>
                 <span>ID: ${escapeHtml(lock.id)}</span>
               </div>
             </div>
             <div class="ui-lock-guard__lock-actions">
-              <button class="b3-button b3-button--outline" data-action="unlock">${this.t(
+              <button class="b3-button b3-button--outline" data-action="unlock" ${isTimerLock ? "disabled" : ""}>${this.t(
                 "settings.unlock",
               )}</button>
-              <button class="b3-button b3-button--outline" data-action="remove">${this.t(
+              <button class="b3-button b3-button--outline" data-action="remove" ${isTimerLock ? "disabled" : ""}>${this.t(
                 "settings.removeLock",
               )}</button>
             </div>
@@ -3554,6 +3860,7 @@ class UiLockGuardPlugin extends Plugin {
   onSettingLockListClick = (event) => {
     const btn = event.target.closest("[data-action]");
     if (!btn) return;
+    if (btn.disabled) return;
     const item = btn.closest("[data-lock-key]");
     if (!item) return;
     const lock = this.getLockByKey(item.getAttribute("data-lock-key"));
