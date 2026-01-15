@@ -450,6 +450,16 @@ function isTreeToggleTarget(target, item) {
   return toggle === target || toggle.contains(target);
 }
 
+function isTreeEmojiTarget(target, item) {
+  if (!target || !item) return false;
+  const selector = ".b3-list-item__icon";
+  if (typeof target.closest === "function") {
+    const found = target.closest(selector);
+    if (found && item.contains(found)) return true;
+  }
+  return target.classList?.contains("b3-list-item__icon") && item.contains(target);
+}
+
 function findClosestByAttr(target, attr) {
   if (!target) return null;
   if (typeof target.closest === "function") {
@@ -2775,6 +2785,7 @@ class UiLockGuardPlugin extends Plugin {
         ? target.closest("ul").previousElementSibling
         : null);
     if (!item) return false;
+    if (isTreeEmojiTarget(target, item)) return false;
     const inDocTree = this.docTreeContainer?.isConnected && this.docTreeContainer.contains(item);
     if (!inDocTree && !isProbablyDocTreeItem(item)) return false;
     const info = resolveTreeItemInfo(item);
