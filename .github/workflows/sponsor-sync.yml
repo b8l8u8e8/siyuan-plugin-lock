@@ -30,58 +30,35 @@ jobs:
           echo "default_branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
           echo "Default branch: $DEFAULT_BRANCH"
 
-      - name: Fetch sponsor-list.md from share repo
+      - name: Fetch sponsor-list.md from share repo (to temp)
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL "https://raw.githubusercontent.com/b8l8u8e8/siyuan-plugin-share/HEAD/sponsor-list.md" -o sponsor-list.md
+          curl -fsSL "https://raw.githubusercontent.com/b8l8u8e8/siyuan-plugin-share/HEAD/sponsor-list.md" \
+            -o /tmp/sponsor-list.from-share.md
 
-      - name: Check if changed
-        id: changed
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -f sponsor-list.md ]; then
-            echo "sponsor-list.md not found in lock repo (will add it)."
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if git diff --no-index --quiet sponsor-list.md sponsor-list.md 2>/dev/null; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if diff -q sponsor-list.md sponsor-list.md >/dev/null 2>&1; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Compare with repo file
+      - name: Compare & update working tree
         id: diffcheck
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f sponsor-list.md ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
 
-          mv sponsor-list.md /tmp/sponsor-list.from-share.md
-
+          # 如果仓库里还没有 sponsor-list.md，直接创建
           if [ ! -f sponsor-list.md ]; then
             echo "No local sponsor-list.md, will create."
-            echo "changed=true" >> "$GITHUB_OUTPUT"
             cp /tmp/sponsor-list.from-share.md sponsor-list.md
+            echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          # 有文件则对比：相同就不动；不同就覆盖
           if diff -q sponsor-list.md /tmp/sponsor-list.from-share.md >/dev/null; then
             echo "No changes."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "Changed."
-            echo "changed=true" >> "$GITHUB_OUTPUT"
             cp /tmp/sponsor-list.from-share.md sponsor-list.md
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Commit & push (if changed)
@@ -93,5 +70,12 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add sponsor-list.md
+
+          # ✅ 保险：即使误判 changed，也不会因为“无可提交”而失败
+          if git diff --cached --quiet; then
+            echo "No changes staged, skip commit."
+            exit 0
+          fi
+
           git commit -m "chore: sync sponsor-list.md from share"
           git push origin "HEAD:${{ steps.branch.outputs.default_branch }}"
