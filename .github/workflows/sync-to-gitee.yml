@@ -1,0 +1,41 @@
+# 名字随便起
+name: Sync to Gitee
+
+# 触发条件：当代码推送到 main 分支时触发
+# 如果你的主分支叫 master，请把下面的 main 改成 master
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  repo-sync:
+    env:
+      # 这里填写你的 Gitee 用户名
+      dst_key: ${{ secrets.GITEE_PRIVATE_KEY }}
+      dst_token: ${{ secrets.GITEE_TOKEN }}
+      gitee_user: jie8686  # 【注意】改成你的 Gitee 用户名
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+
+      - name: Mirror the Github organization repos to Gitee.
+        uses: Yikun/hub-mirror-action@master
+        if: env.dst_key && env.dst_token
+        with:
+          # 必选：源端账户名（就是你的 GitHub 用户名）
+          src: github/b8l8u8e8 # 【注意】改成你的 GitHub 用户名
+          # 必选：目的端账户名（就是你的 Gitee 用户名）
+          dst: gitee/jie8686   # 【注意】改成你的 Gitee 用户名
+          # 必选：SSH 私钥 (自动读取之前设置的 Secret)
+          dst_key: ${{ secrets.GITEE_PRIVATE_KEY }}
+          # 必选：Gitee Token (自动读取之前设置的 Secret)
+          dst_token: ${{ secrets.GITEE_TOKEN }}
+          # 可选：指定要同步的仓库名称，如果不填，默认同步当前仓库
+          # static_list: "repo_name"
+          # 可选：设置为 true 强制覆盖 Gitee 代码（慎用，除非你确定只在 GitHub 修改代码）
+          force_update: true
+          # 可选：debug 模式，如果失败了可以开启看日志
+          debug: true
