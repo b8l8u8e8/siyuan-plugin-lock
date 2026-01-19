@@ -36,6 +36,7 @@ const DEFAULT_SETTINGS = {
   autoLockFloatByDevice: null,
   treeCountdownEnabled: true,
   searchHideLockedEnabled: false,
+  commonSecrets: [],
 };
 const DEFAULT_TIMER_MINUTES = 60;
 const TOUCH_LISTENER_OPTIONS = {capture: true, passive: false};
@@ -273,6 +274,12 @@ async function hashSecret(secret, saltBase64) {
 
 function makeLockKey(type, id) {
   return `${type}:${id}`;
+}
+
+function createCommonSecretId() {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `cs_${ts}_${rand}`;
 }
 
 function extractDocIdFromPath(path) {
@@ -1097,6 +1104,7 @@ class UiLockGuardPlugin extends Plugin {
       autoEnable: null,
       autoMinutes: null,
       autoCountdown: null,
+      commonListWrap: null,
       lockListWrap: null,
     };
     this.patternCleanup = null;
@@ -1191,6 +1199,7 @@ class UiLockGuardPlugin extends Plugin {
   async loadState() {
     const locks = (await this.loadData(STORAGE_LOCKS)) || [];
     const settings = (await this.loadData(STORAGE_SETTINGS)) || {};
+    const normalizedCommonSecrets = this.normalizeCommonSecrets(settings.commonSecrets);
     this.locks = Array.isArray(locks) ? locks : [];
     this.settings = {
       ...DEFAULT_SETTINGS,
@@ -1220,6 +1229,7 @@ class UiLockGuardPlugin extends Plugin {
         typeof settings.searchHideLockedEnabled === "boolean"
           ? settings.searchHideLockedEnabled
           : DEFAULT_SETTINGS.searchHideLockedEnabled,
+      commonSecrets: normalizedCommonSecrets,
     };
     this.searchHideLockedEnabled = !!this.settings.searchHideLockedEnabled;
 
@@ -1231,6 +1241,7 @@ class UiLockGuardPlugin extends Plugin {
     this.collapseLockedDocs();
     this.refreshAllProtyles();
     this.applyAutoLockSettings();
+    this.renderSettingCommonSecretList();
     this.renderSettingLockList();
     this.syncSettingInputs();
     this.scheduleSearchRefresh();
@@ -1257,6 +1268,30 @@ class UiLockGuardPlugin extends Plugin {
       .filter((lock) => isValidId(lock.id));
   }
 
+  normalizeCommonSecrets(list) {
+    if (!Array.isArray(list)) return [];
+    const now = nowTs();
+    const seen = new Set();
+    const normalized = list
+      .map((item) => ({
+        id: String(item?.id || "").trim(),
+        name: String(item?.name || "").trim(),
+        lockType: item?.lockType === "pattern" ? "pattern" : "password",
+        salt: String(item?.salt || ""),
+        hash: String(item?.hash || ""),
+        createdAt: clampInt(item?.createdAt, 0, Number.MAX_SAFE_INTEGER, now),
+        updatedAt: clampInt(item?.updatedAt, 0, Number.MAX_SAFE_INTEGER, now),
+      }))
+      .filter((item) => item.id && item.name && item.salt && item.hash)
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      })
+      .sort((a, b) => a.createdAt - b.createdAt);
+    return normalized;
+  }
+
   async saveLocks() {
     await this.saveData(STORAGE_LOCKS, this.locks);
   }
@@ -1274,6 +1309,12 @@ class UiLockGuardPlugin extends Plugin {
     const [type, id] = key.split(":");
     if (!type || !id) return null;
     return this.getLock(type, id);
+  }
+
+  getCommonSecretById(id) {
+    if (!id) return null;
+    const list = Array.isArray(this.settings.commonSecrets) ? this.settings.commonSecrets : [];
+    return list.find((item) => item.id === id) || null;
   }
 
   hasLock(id) {
@@ -3050,6 +3091,17 @@ class UiLockGuardPlugin extends Plugin {
               </div>
               <div class="ui-lock-guard__hint" data-pattern-status>${this.t("lock.drawPattern")}</div>
             </div>
+            <div class="ui-lock-guard__common-select" data-common-select-wrap style="display:none;">
+              <div class="ui-lock-guard__common-row">
+                <select class="b3-select" data-common-select></select>
+                <button class="b3-button b3-button--outline" data-common-clear>${this.t(
+                  "lock.commonSelectClear",
+                )}</button>
+              </div>
+              <div class="ui-lock-guard__hint" data-common-selected-hint style="display:none;">${this.t(
+                "lock.commonSelectedHint",
+              )}</div>
+            </div>
             <div style="height: 8px;"></div>
             <input class="b3-text-field fn__block" type="text" data-hint placeholder="${this.t(
               "lock.hintPlaceholder",
@@ -3097,6 +3149,10 @@ class UiLockGuardPlugin extends Plugin {
     const passwordWrap = root.querySelector("[data-password-wrap]");
     const patternWrap = root.querySelector("[data-pattern-wrap]");
     const secretTitle = root.querySelector("[data-secret-title]");
+    const commonSelectWrap = root.querySelector("[data-common-select-wrap]");
+    const commonSelect = root.querySelector("[data-common-select]");
+    const commonClearBtn = root.querySelector("[data-common-clear]");
+    const commonSelectedHint = root.querySelector("[data-common-selected-hint]");
     const passwordInput = root.querySelector("[data-password]");
     const passwordConfirm = root.querySelector("[data-password-confirm]");
     const patternStatus = root.querySelector("[data-pattern-status]");
@@ -3121,6 +3177,7 @@ class UiLockGuardPlugin extends Plugin {
       policy: "always",
       trustMinutes: 30,
       timerMinutes: DEFAULT_TIMER_MINUTES,
+      commonSecretId: "",
     };
 
     const updateSteps = () => {
@@ -3134,7 +3191,7 @@ class UiLockGuardPlugin extends Plugin {
       if (btnNext) {
         if (state.step === 1) btnNext.disabled = !state.lockType;
         if (state.step === 2) {
-          btnNext.disabled = state.lockType === "pattern" && !state.secret;
+          btnNext.disabled = state.lockType === "pattern" && !state.secret && !state.commonSecretId;
         }
       }
       if (btnSave) btnSave.disabled = state.step !== 3;
@@ -3147,15 +3204,80 @@ class UiLockGuardPlugin extends Plugin {
       });
     };
 
+    const getCommonSecretsForType = (lockType) => {
+      if (!lockType) return [];
+      const list = Array.isArray(this.settings.commonSecrets) ? this.settings.commonSecrets : [];
+      return list.filter((item) => item.lockType === lockType);
+    };
+
+    const updateSecretInputs = () => {
+      const usingCommon = !!state.commonSecretId;
+      if (passwordWrap) {
+        passwordWrap.style.display = state.lockType === "password" && !usingCommon ? "" : "none";
+      }
+      if (patternWrap) {
+        patternWrap.style.display = state.lockType === "pattern" && !usingCommon ? "" : "none";
+      }
+      if (commonSelectedHint) commonSelectedHint.style.display = usingCommon ? "" : "none";
+      if (commonClearBtn) commonClearBtn.style.display = usingCommon ? "" : "none";
+
+      if (state.lockType !== "pattern" || usingCommon) {
+        if (this.patternCleanup) {
+          this.patternCleanup();
+          this.patternCleanup = null;
+        }
+        return;
+      }
+      if (!this.patternCleanup && patternWrap) {
+        this.patternCleanup = createPatternPad(patternWrap.querySelector(".ui-lock-guard__pattern"), {
+          mode: "set",
+          onComplete: (pattern) => {
+            state.secret = pattern;
+            updateSteps();
+          },
+          onStatus: (code) => setPatternStatus(code),
+        });
+        setPatternStatus();
+      }
+    };
+
+    const renderCommonSelect = () => {
+      if (!commonSelectWrap || !commonSelect) return;
+      const list = getCommonSecretsForType(state.lockType);
+      if (!list.length) {
+        commonSelectWrap.style.display = "none";
+        state.commonSecretId = "";
+        commonSelect.innerHTML = "";
+        updateSecretInputs();
+        updateSteps();
+        return;
+      }
+      commonSelectWrap.style.display = "";
+      const optionHtml = [
+        `<option value="">${escapeHtml(this.t("lock.commonSelectPlaceholder"))}</option>`,
+        ...list.map((item) => `<option value="${escapeAttr(item.id)}">${escapeHtml(item.name)}</option>`),
+      ].join("");
+      commonSelect.innerHTML = optionHtml;
+      if (!list.some((item) => item.id === state.commonSecretId)) {
+        state.commonSecretId = "";
+      }
+      commonSelect.value = state.commonSecretId || "";
+      updateSecretInputs();
+      updateSteps();
+    };
+
     const showSecretStep = () => {
       secretTitle.textContent =
         state.lockType === "pattern" ? this.t("lock.drawPattern") : this.t("lock.setPassword");
+      state.commonSecretId = "";
       passwordWrap.style.display = state.lockType === "password" ? "" : "none";
       patternWrap.style.display = state.lockType === "pattern" ? "" : "none";
       if (passwordInput) passwordInput.value = "";
       if (passwordConfirm) passwordConfirm.value = "";
       if (hintInput) hintInput.value = state.hint || "";
       state.secret = "";
+      renderCommonSelect();
+      updateSecretInputs();
       updateSteps();
     };
 
@@ -3176,9 +3298,32 @@ class UiLockGuardPlugin extends Plugin {
     typeCards.forEach((card) => {
       card.addEventListener("click", () => {
         state.lockType = card.getAttribute("data-type");
+        state.commonSecretId = "";
+        state.secret = "";
         updateTypeCards();
+        renderCommonSelect();
+        updateSecretInputs();
         updateSteps();
       });
+    });
+
+    commonSelect?.addEventListener("change", () => {
+      state.commonSecretId = String(commonSelect.value || "");
+      state.secret = "";
+      if (passwordInput) passwordInput.value = "";
+      if (passwordConfirm) passwordConfirm.value = "";
+      renderCommonSelect();
+      updateSteps();
+    });
+
+    commonClearBtn?.addEventListener("click", () => {
+      state.commonSecretId = "";
+      state.secret = "";
+      if (commonSelect) commonSelect.value = "";
+      if (passwordInput) passwordInput.value = "";
+      if (passwordConfirm) passwordConfirm.value = "";
+      renderCommonSelect();
+      updateSteps();
     });
 
     btnCancel?.addEventListener("click", () => dialog.destroy());
@@ -3192,35 +3337,27 @@ class UiLockGuardPlugin extends Plugin {
         if (!state.lockType) return;
         state.step = 2;
         showSecretStep();
-        if (state.lockType === "pattern" && patternStatus) {
-          if (this.patternCleanup) this.patternCleanup();
-          this.patternCleanup = createPatternPad(patternWrap.querySelector(".ui-lock-guard__pattern"), {
-            mode: "set",
-            onComplete: (pattern) => {
-              state.secret = pattern;
-              updateSteps();
-            },
-            onStatus: (code) => setPatternStatus(code),
-          });
-          setPatternStatus();
-        }
         return;
       }
       if (state.step === 2) {
         if (state.lockType === "password") {
-          const pwd = String(passwordInput?.value || "");
-          const confirm = String(passwordConfirm?.value || "");
-          if (!pwd) {
-            showMessage(this.t("lock.secretRequired"));
-            return;
+          if (!state.commonSecretId) {
+            const pwd = String(passwordInput?.value || "");
+            const confirm = String(passwordConfirm?.value || "");
+            if (!pwd) {
+              showMessage(this.t("lock.secretRequired"));
+              return;
+            }
+            if (pwd !== confirm) {
+              showMessage(this.t("lock.passwordMismatch"));
+              return;
+            }
+            state.secret = pwd;
+          } else {
+            state.secret = "";
           }
-          if (pwd !== confirm) {
-            showMessage(this.t("lock.passwordMismatch"));
-            return;
-          }
-          state.secret = pwd;
         }
-        if (!state.secret) {
+        if (!state.secret && !state.commonSecretId) {
           showMessage(this.t("lock.secretRequired"));
           return;
         }
@@ -3235,9 +3372,17 @@ class UiLockGuardPlugin extends Plugin {
       state.trustMinutes = trustVal;
       state.timerMinutes = timerVal;
       state.hint = String(hintInput?.value || "").trim();
-      if (!state.lockType || !state.secret) {
+      if (!state.lockType || (!state.secret && !state.commonSecretId)) {
         showMessage(this.t("lock.secretRequired"));
         return;
+      }
+      let commonSecret = null;
+      if (state.commonSecretId) {
+        commonSecret = this.getCommonSecretById(state.commonSecretId);
+        if (!commonSecret || commonSecret.lockType !== state.lockType) {
+          showMessage(this.t("lock.secretRequired"));
+          return;
+        }
       }
       const policy = state.policy;
       if (policy === "timer") {
@@ -3250,6 +3395,7 @@ class UiLockGuardPlugin extends Plugin {
         title: name,
         lockType: state.lockType,
         secret: state.secret,
+        secretHash: commonSecret ? {salt: commonSecret.salt, hash: commonSecret.hash} : null,
         hint: state.hint,
         policy,
         trustMinutes: trustVal,
@@ -3323,8 +3469,14 @@ class UiLockGuardPlugin extends Plugin {
     });
   }
 
-  async createLockRecord({id, type, title, lockType, secret, hint, policy, trustMinutes, timerMinutes}) {
-    const {salt, hash} = await hashSecret(secret);
+  async createLockRecord({id, type, title, lockType, secret, secretHash, hint, policy, trustMinutes, timerMinutes}) {
+    let salt = secretHash?.salt || "";
+    let hash = secretHash?.hash || "";
+    if (!salt || !hash) {
+      const hashed = await hashSecret(secret);
+      salt = hashed.salt;
+      hash = hashed.hash;
+    }
     const now = nowTs();
     const newLock = {
       id,
@@ -3610,12 +3762,25 @@ class UiLockGuardPlugin extends Plugin {
     treeCountdownWrap.innerHTML = '<input type="checkbox"><span class="ui-lock-guard__toggle-slider"></span>';
     const treeCountdown = treeCountdownWrap.querySelector("input");
 
+    const commonListWrap = document.createElement("div");
+    commonListWrap.className = "ui-lock-guard__common-list";
+    commonListWrap.style.width = "100%";
+    commonListWrap.addEventListener("click", this.onSettingCommonListClick);
+
     const lockListWrap = document.createElement("div");
     lockListWrap.className = "ui-lock-guard__lock-list";
     lockListWrap.style.width = "100%";
     lockListWrap.addEventListener("click", this.onSettingLockListClick);
 
-    this.settingEls = {autoEnable, autoMinutes, autoCountdown, autoPosition, treeCountdown, lockListWrap};
+    this.settingEls = {
+      autoEnable,
+      autoMinutes,
+      autoCountdown,
+      autoPosition,
+      treeCountdown,
+      commonListWrap,
+      lockListWrap,
+    };
 
     this.setting = new Setting({
       width: "100vw",
@@ -3647,6 +3812,12 @@ class UiLockGuardPlugin extends Plugin {
       title: this.t("settings.showTreeCountdown"),
       description: this.t("settings.treeCountdownHint"),
       createActionElement: () => treeCountdownWrap,
+    });
+    this.setting.addItem({
+      title: "",
+      description: "",
+      direction: "column",
+      createActionElement: () => commonListWrap,
     });
     this.setting.addItem({
       title: "",
@@ -3802,6 +3973,51 @@ class UiLockGuardPlugin extends Plugin {
     this.settingLockTick = null;
   }
 
+  renderSettingCommonSecretList() {
+    const wrap = this.settingEls.commonListWrap;
+    if (!wrap) return;
+    const list = Array.isArray(this.settings.commonSecrets) ? this.settings.commonSecrets : [];
+    const headerHtml = `
+      <div class="ui-lock-guard__common-header">
+        <div class="ui-lock-guard__common-header-title">${this.t("settings.commonSecretsTitle")}</div>
+        <button class="b3-button b3-button--outline" data-action="common-add">${this.t(
+          "settings.commonSecretsAdd",
+        )}</button>
+      </div>
+    `;
+    if (!list.length) {
+      wrap.innerHTML = `${headerHtml}<div class="ui-lock-guard__hint">${this.t(
+        "settings.commonSecretsEmpty",
+      )}</div>`;
+      return;
+    }
+    wrap.innerHTML =
+      headerHtml +
+      list
+        .map((item) => {
+          const typeLabel = this.t(
+            item.lockType === "pattern" ? "settings.lockTypePattern" : "settings.lockTypePassword",
+          );
+          return `
+            <div class="ui-lock-guard__common-item" data-common-id="${escapeAttr(item.id)}">
+              <div class="ui-lock-guard__common-title">${escapeHtml(item.name)}</div>
+              <div class="ui-lock-guard__common-meta">
+                <span>${this.t("settings.lockType")}: ${escapeHtml(typeLabel)}</span>
+              </div>
+              <div class="ui-lock-guard__common-actions">
+                <button class="b3-button b3-button--outline" data-action="common-edit">${this.t(
+                  "settings.commonSecretsEdit",
+                )}</button>
+                <button class="b3-button b3-button--outline" data-action="common-remove">${this.t(
+                  "settings.commonSecretsRemove",
+                )}</button>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+  }
+
   renderSettingLockList() {
     const wrap = this.settingEls.lockListWrap;
     if (!wrap) return;
@@ -3866,6 +4082,376 @@ class UiLockGuardPlugin extends Plugin {
     } else {
       this.stopSettingLockTick();
     }
+  }
+
+  onSettingCommonListClick = async (event) => {
+    const btn = event.target.closest("[data-action]");
+    if (!btn) return;
+    if (btn.disabled) return;
+    const action = btn.getAttribute("data-action");
+    if (action === "common-add") {
+      void this.openCommonSecretDialog({mode: "add"});
+      return;
+    }
+    const item = btn.closest("[data-common-id]");
+    if (!item) return;
+    const secret = this.getCommonSecretById(item.getAttribute("data-common-id"));
+    if (!secret) return;
+    if (action === "common-edit") {
+      const ok = await this.verifyCommonSecret(secret);
+      if (!ok) return;
+      void this.openCommonSecretDialog({mode: "edit", secret});
+      return;
+    }
+    if (action === "common-remove") {
+      const ok = await this.verifyCommonSecret(secret);
+      if (!ok) return;
+      this.settings = {
+        ...this.settings,
+        commonSecrets: this.settings.commonSecrets.filter((entry) => entry.id !== secret.id),
+      };
+      void this.saveSettings();
+      this.renderSettingCommonSecretList();
+      showMessage(this.t("settings.commonSecretsRemoved"));
+    }
+  };
+
+  async verifyCommonSecret(secret) {
+    if (!secret) return false;
+    return new Promise((resolve) => {
+      let resolved = false;
+      let cleanupPattern = null;
+      const finalize = (value) => {
+        if (resolved) return;
+        resolved = true;
+        resolve(value);
+      };
+      const dialog = new Dialog({
+        title: this.t("settings.commonSecretsVerifyTitle"),
+        content: `
+          <div class="ui-lock-guard__dialog">
+            <div class="ui-lock-guard__step-title">${this.t("settings.commonSecretsVerifyTitle")}</div>
+            <div class="ui-lock-guard__hint">${this.t("settings.commonSecretsVerifyHint")}</div>
+            <div data-verify-password style="display:none;">
+              <input class="b3-text-field fn__block" type="password" placeholder="${this.t(
+                "settings.commonSecretsVerifyPassword",
+              )}" />
+            </div>
+            <div data-verify-pattern style="display:none;">
+              <div class="ui-lock-guard__pattern">
+                <svg class="ui-lock-guard__pattern-line"></svg>
+                <div class="ui-lock-guard__pattern-grid">
+                  ${Array.from({length: 9})
+                    .map((_, idx) => `<div class="ui-lock-guard__pattern-dot" data-index="${idx + 1}"></div>`)
+                    .join("")}
+                </div>
+              </div>
+              <div class="ui-lock-guard__hint" data-verify-status>${this.t("unlock.drawPattern")}</div>
+            </div>
+            <div class="ui-lock-guard__dialog-actions">
+              <button class="b3-button b3-button--outline" data-action="cancel">${this.t(
+                "lock.stepCancel",
+              )}</button>
+              <button class="b3-button b3-button--primary" data-action="verify">${this.t(
+                "unlock.verify",
+              )}</button>
+            </div>
+          </div>
+        `,
+        width: "min(420px, 92vw)",
+        destroyCallback: () => {
+          if (cleanupPattern) cleanupPattern();
+          finalize(false);
+        },
+      });
+
+      const root = dialog.element.querySelector(".ui-lock-guard__dialog");
+      const passwordWrap = root.querySelector("[data-verify-password]");
+      const patternWrap = root.querySelector("[data-verify-pattern]");
+      const statusEl = root.querySelector("[data-verify-status]");
+      const verifyBtn = root.querySelector("[data-action='verify']");
+      const cancelBtn = root.querySelector("[data-action='cancel']");
+      const passwordInput = passwordWrap?.querySelector("input");
+
+      let inputSecret = "";
+      const doVerify = async () => {
+        if (!inputSecret) return;
+        const {hash} = await hashSecret(inputSecret, secret.salt);
+        if (hash === secret.hash) {
+          finalize(true);
+          dialog.destroy();
+          return;
+        }
+        showMessage(this.t("unlock.fail"));
+        dialog.destroy();
+      };
+
+      const initVerifyPattern = () => {
+        if (cleanupPattern) cleanupPattern();
+        cleanupPattern = createPatternPad(patternWrap.querySelector(".ui-lock-guard__pattern"), {
+          mode: "verify",
+          onComplete: async (pattern) => {
+            inputSecret = pattern;
+            if (statusEl) statusEl.textContent = this.t("unlock.verify");
+            await doVerify();
+          },
+        });
+      };
+
+      if (secret.lockType === "password") {
+        passwordWrap.style.display = "";
+        passwordInput?.focus();
+        passwordInput?.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            inputSecret = String(passwordInput.value || "");
+            void doVerify();
+          }
+        });
+      } else {
+        patternWrap.style.display = "";
+        initVerifyPattern();
+      }
+
+      verifyBtn?.addEventListener("click", () => {
+        if (secret.lockType === "password") {
+          inputSecret = String(passwordInput?.value || "");
+        }
+        void doVerify();
+      });
+
+      cancelBtn?.addEventListener("click", () => {
+        if (cleanupPattern) cleanupPattern();
+        finalize(false);
+        dialog.destroy();
+      });
+    });
+  }
+
+  async openCommonSecretDialog({mode, secret} = {}) {
+    const isEdit = mode === "edit" && secret;
+    const original = isEdit ? secret : null;
+    const originalType = original?.lockType === "pattern" ? "pattern" : "password";
+    let cleanupNewPattern = null;
+    const dialog = new Dialog({
+      title: isEdit
+        ? this.t("settings.commonSecretsDialogEditTitle")
+        : this.t("settings.commonSecretsDialogAddTitle"),
+      content: `
+        <div class="ui-lock-guard__dialog">
+          <div class="ui-lock-guard__step-title">${
+            isEdit ? this.t("settings.commonSecretsDialogEditTitle") : this.t("settings.commonSecretsDialogAddTitle")
+          }</div>
+          <input class="b3-text-field fn__block" type="text" data-common-name placeholder="${this.t(
+            "settings.commonSecretsNamePlaceholder",
+          )}" />
+          <div style="height: 8px;"></div>
+          <select class="b3-select fn__block" data-common-type>
+            <option value="password">${escapeHtml(this.t("settings.lockTypePassword"))}</option>
+            <option value="pattern">${escapeHtml(this.t("settings.lockTypePattern"))}</option>
+          </select>
+          <div style="height: 8px;"></div>
+          <div data-common-new-password>
+            <input class="b3-text-field fn__block" type="password" data-common-password placeholder="${this.t(
+              "lock.setPassword",
+            )}" />
+            <div style="height: 8px;"></div>
+            <input class="b3-text-field fn__block" type="password" data-common-password-confirm placeholder="${this.t(
+              "lock.confirmPassword",
+            )}" />
+            <div class="ui-lock-guard__hint">${this.t("lock.passwordHint")}</div>
+          </div>
+          <div data-common-new-pattern style="display:none;">
+            <div class="ui-lock-guard__pattern">
+              <svg class="ui-lock-guard__pattern-line"></svg>
+              <div class="ui-lock-guard__pattern-grid">
+                ${Array.from({length: 9})
+                  .map((_, idx) => `<div class="ui-lock-guard__pattern-dot" data-index="${idx + 1}"></div>`)
+                  .join("")}
+              </div>
+            </div>
+            <div class="ui-lock-guard__hint" data-common-new-pattern-status>${this.t("lock.drawPattern")}</div>
+          </div>
+          <div class="ui-lock-guard__dialog-actions">
+            <button class="b3-button b3-button--outline" data-action="cancel">${this.t(
+              "lock.stepCancel",
+            )}</button>
+            <button class="b3-button b3-button--primary" data-action="save">${this.t("lock.stepSave")}</button>
+          </div>
+        </div>
+      `,
+      width: "min(520px, 92vw)",
+      destroyCallback: () => {
+        if (cleanupNewPattern) cleanupNewPattern();
+      },
+    });
+
+    const root = dialog.element.querySelector(".ui-lock-guard__dialog");
+    const nameInput = root.querySelector("[data-common-name]");
+    const typeSelect = root.querySelector("[data-common-type]");
+    const newPasswordWrap = root.querySelector("[data-common-new-password]");
+    const newPasswordInput = root.querySelector("[data-common-password]");
+    const newPasswordConfirm = root.querySelector("[data-common-password-confirm]");
+    const newPatternWrap = root.querySelector("[data-common-new-pattern]");
+    const newPatternStatus = root.querySelector("[data-common-new-pattern-status]");
+    const btnCancel = root.querySelector("[data-action='cancel']");
+    const btnSave = root.querySelector("[data-action='save']");
+
+    const state = {
+      lockType: original?.lockType === "pattern" ? "pattern" : "password",
+      newSecret: "",
+    };
+
+    const setNewPatternStatus = (code) => {
+      if (!newPatternStatus) return;
+      if (code === "pattern-too-short") newPatternStatus.textContent = this.t("lock.patternTooShort");
+      else if (code === "pattern-mismatch") newPatternStatus.textContent = this.t("lock.patternMismatch");
+      else if (code === "draw-again") newPatternStatus.textContent = this.t("lock.drawAgain");
+      else if (code === "pattern-confirmed") newPatternStatus.textContent = this.t("lock.patternConfirmed");
+      else newPatternStatus.textContent = this.t("lock.drawPattern");
+    };
+
+    const initNewPatternPad = () => {
+      if (!newPatternWrap) return;
+      if (cleanupNewPattern) cleanupNewPattern();
+      cleanupNewPattern = createPatternPad(newPatternWrap.querySelector(".ui-lock-guard__pattern"), {
+        mode: "set",
+        onComplete: (pattern) => {
+          state.newSecret = pattern;
+        },
+        onStatus: (code) => setNewPatternStatus(code),
+      });
+      setNewPatternStatus();
+    };
+
+    const isNewSecretProvided = () => {
+      if (state.lockType === "password") {
+        return !!(newPasswordInput?.value || newPasswordConfirm?.value);
+      }
+      return !!state.newSecret;
+    };
+
+    const updateSecretUI = () => {
+      if (state.lockType === "password") {
+        if (newPasswordWrap) newPasswordWrap.style.display = "";
+        if (newPatternWrap) newPatternWrap.style.display = "none";
+        if (cleanupNewPattern) cleanupNewPattern();
+        cleanupNewPattern = null;
+        state.newSecret = "";
+      } else {
+        if (newPasswordWrap) newPasswordWrap.style.display = "none";
+        if (newPatternWrap) newPatternWrap.style.display = "";
+        if (newPasswordInput) newPasswordInput.value = "";
+        if (newPasswordConfirm) newPasswordConfirm.value = "";
+        initNewPatternPad();
+      }
+    };
+
+    if (nameInput) nameInput.value = original?.name || "";
+    if (typeSelect) typeSelect.value = state.lockType;
+
+    typeSelect?.addEventListener("change", () => {
+      state.lockType = typeSelect.value === "pattern" ? "pattern" : "password";
+      state.newSecret = "";
+      updateSecretUI();
+    });
+
+    btnCancel?.addEventListener("click", () => dialog.destroy());
+    btnSave?.addEventListener("click", async () => {
+      const name = String(nameInput?.value || "").trim();
+      if (!name) {
+        showMessage(this.t("settings.commonSecretsNameRequired"));
+        return;
+      }
+      const typeChanged = isEdit && state.lockType !== originalType;
+      const newSecretProvided = isNewSecretProvided();
+
+      if (!isEdit && !newSecretProvided) {
+        showMessage(this.t("settings.commonSecretsSecretRequired"));
+        return;
+      }
+      if (typeChanged && !newSecretProvided) {
+        showMessage(this.t("settings.commonSecretsSecretRequired"));
+        return;
+      }
+
+      let nextSecret = "";
+      if (state.lockType === "password" && newSecretProvided) {
+        const pwd = String(newPasswordInput?.value || "");
+        const confirm = String(newPasswordConfirm?.value || "");
+        if (!pwd) {
+          showMessage(this.t("settings.commonSecretsSecretRequired"));
+          return;
+        }
+        if (pwd !== confirm) {
+          showMessage(this.t("lock.passwordMismatch"));
+          return;
+        }
+        nextSecret = pwd;
+      }
+      if (state.lockType === "pattern" && newSecretProvided) {
+        if (!state.newSecret) {
+          showMessage(this.t("settings.commonSecretsSecretRequired"));
+          return;
+        }
+        nextSecret = state.newSecret;
+      }
+
+      const now = nowTs();
+      let salt = original?.salt || "";
+      let hash = original?.hash || "";
+      if (!isEdit || newSecretProvided || typeChanged) {
+        const hashed = await hashSecret(nextSecret);
+        salt = hashed.salt;
+        hash = hashed.hash;
+      }
+
+      if (isEdit) {
+        const updated = this.settings.commonSecrets.map((entry) =>
+          entry.id === original.id
+            ? {
+                ...entry,
+                name,
+                lockType: state.lockType,
+                salt,
+                hash,
+                updatedAt: now,
+              }
+            : entry,
+        );
+        this.settings = {
+          ...this.settings,
+          commonSecrets: updated.sort((a, b) => a.createdAt - b.createdAt),
+        };
+      } else {
+        let id = createCommonSecretId();
+        while (this.getCommonSecretById(id)) {
+          id = createCommonSecretId();
+        }
+        const next = [
+          ...this.settings.commonSecrets,
+          {
+            id,
+            name,
+            lockType: state.lockType,
+            salt,
+            hash,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+        this.settings = {
+          ...this.settings,
+          commonSecrets: next.sort((a, b) => a.createdAt - b.createdAt),
+        };
+      }
+
+      await this.saveSettings();
+      this.renderSettingCommonSecretList();
+      showMessage(this.t("settings.commonSecretsSaved"));
+      dialog.destroy();
+    });
+
+    updateSecretUI();
   }
 
   onSettingLockListClick = (event) => {
