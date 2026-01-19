@@ -74,3 +74,4 @@ If you find this project helpful, your support is welcome. It encourages me to k
 - **Issues / Feedback**: [GitHub Issues](https://github.com/b8l8u8e8/siyuan-plugin-lock/issues)
 - **License**: [MIT License](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/LICENSE)
 - **Changelog**: [CHANGELOG.md](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/CHANGELOG.md)
+- **Sponsor List**:  [Sponsor List](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/sponsor-list.md)
