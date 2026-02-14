@@ -9,6 +9,7 @@
 
 | 赞助者                                   | 支付方式 | 金额 | 赞助插件                                                     | 付款时间         |
 | ---------------------------------------- | -------- | ---- | ------------------------------------------------------------ | ---------------- |
+| *宁                                      | 微信     | ¥50  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-02-14 09:18 |
 | **旸                                     | 支付宝   | ¥50  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-02-07 20:02 |
 | *I                                       | 微信     | ¥25  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-02-06 21:05 |
 | **旸                                     | 支付宝   | ¥50  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-01-31 21:35 |
