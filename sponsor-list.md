@@ -9,13 +9,14 @@
 
 | 赞助者                                   | 支付方式 | 金额 | 赞助插件                                                     | 付款时间         |
 | ---------------------------------------- | -------- | ---- | ------------------------------------------------------------ | ---------------- |
+| *胖                                      | 微信     | ¥20  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-02-25 21:30 |
 | *宁                                      | 微信     | ¥50  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-02-14 09:18 |
 | **旸                                     | 支付宝   | ¥50  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-02-07 20:02 |
 | *I                                       | 微信     | ¥25  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-02-06 21:05 |
 | **旸                                     | 支付宝   | ¥50  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-01-31 21:35 |
 | *吧([idslee](https://github.com/idslee)) | 微信     | ¥5   | [siyuan-plugin-lock](https://github.com/b8l8u8e8/siyuan-plugin-lock) | 2026-01-19 15:35 |
 | *宁                                      | 微信     | ¥50  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-01-17 09:48 |
-| *胖                                      | 微信     | ¥10  | 未知                                                         | 2026-01-06 22:11 |
+| *胖                                      | 微信     | ¥10  | [siyuan-plugin-share](https://github.com/b8l8u8e8/siyuan-plugin-share) | 2026-01-06 22:11 |
 | J*s                                      | 微信     | ¥100 | [siyuan-plugin-lock](https://github.com/b8l8u8e8/siyuan-plugin-lock) | 2026-01-05 08:21 |
 
 ---
