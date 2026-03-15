@@ -2,7 +2,7 @@
 
 为思源笔记的笔记本与文档提供加锁，支持密码/手势、信任时长自动重锁，以及无操作自动锁屏。
 
-[中文](README_zh_CN.md) | [English](README.md)
+[中文](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/README_zh_CN.md) | [English](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/README.md)
 
 ## ✨ 功能介绍
 

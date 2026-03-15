@@ -2,7 +2,7 @@
 
 Provides locking mechanisms for SiYuan Note notebooks and documents. Supports password/gesture locks, auto-relock based on trusted duration, and auto-lock screen upon inactivity.
 
-[中文](README_zh_CN.md) | [English](README.md)
+[中文](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/README_zh_CN.md) | [English](https://github.com/b8l8u8e8/siyuan-plugin-lock/blob/main/README.md)
 
 ## ✨ Features
 

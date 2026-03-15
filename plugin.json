@@ -23,19 +23,7 @@
     "default": "README.md",
     "zh_CN": "README_zh_CN.md"
   },
-  "funding": {
-    "openCollective": "",
-    "patreon": "",
-    "github": "",
-    "custom": [
-      "https://cos.jie86.cn/LightPicture/2025/03/518c36908c50c51d.jpg"
-    ]
-  },
   "keywords": [
-    "lock",
-    "password",
-    "gesture",
-    "security",
     "加锁",
     "手势",
     "锁屏"
