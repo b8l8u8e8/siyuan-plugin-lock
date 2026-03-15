@@ -1,0 +1,240 @@
+name: GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (used for tag and Release title)
+        required: true
+        type: string
+      prerelease:
+        description: Set as a pre-release
+        required: false
+        default: false
+        type: boolean
+      latest:
+        description: Set as the latest release
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Validate inputs
+        id: validate
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          INPUT_LATEST: ${{ inputs.latest }}
+        run: |
+          set -euo pipefail
+
+          VERSION="$(printf '%s' "${INPUT_VERSION}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          if [ -z "${VERSION}" ]; then
+            echo "Input version cannot be empty."
+            exit 1
+          fi
+
+          if [ "${INPUT_PRERELEASE}" = "true" ] && [ "${INPUT_LATEST}" = "true" ]; then
+            echo "Set as a pre-release and Set as the latest release cannot both be enabled."
+            exit 1
+          fi
+
+          if ! git check-ref-format "refs/tags/${VERSION}" >/dev/null; then
+            echo "Invalid tag format: ${VERSION}"
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check release and tag status
+        id: state
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ steps.validate.outputs.version }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const version = process.env.VERSION;
+            const { owner, repo } = context.repo;
+
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: version,
+              });
+              core.setFailed(`Release ${version} already exists.`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+
+            let tagExists = true;
+            try {
+              await github.rest.git.getRef({
+                owner,
+                repo,
+                ref: `tags/${version}`,
+              });
+            } catch (error) {
+              if (error.status === 404) {
+                tagExists = false;
+              } else {
+                throw error;
+              }
+            }
+
+            core.info(`tag_exists=${tagExists}`);
+            core.setOutput('tag_exists', String(tagExists));
+
+      - name: Create tag if missing
+        if: steps.state.outputs.tag_exists != 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${VERSION}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${VERSION}"
+
+      - name: Build release archives
+        shell: bash
+        env:
+          VERSION: ${{ steps.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          ROOT_ITEMS=(
+            i18n
+            CHANGELOG.md
+            LICENSE
+            README.md
+            README_zh_CN.md
+            icon.png
+            index.css
+            index.js
+            plugin.json
+            preview.png
+          )
+
+          PHP_SITE_ITEMS=(
+            assets
+            vendor
+            config.example.php
+            index.php
+          )
+
+          for item in "${ROOT_ITEMS[@]}"; do
+            if [ ! -e "${item}" ]; then
+              echo "Missing required path: ${item}"
+              exit 1
+            fi
+          done
+
+          for item in "${PHP_SITE_ITEMS[@]}"; do
+            if [ ! -e "php-site/${item}" ]; then
+              echo "Missing required path: php-site/${item}"
+              exit 1
+            fi
+          done
+
+          rm -f package.zip "php-site-${VERSION}.zip"
+
+          zip -r package.zip \
+            i18n \
+            CHANGELOG.md \
+            LICENSE \
+            README.md \
+            README_zh_CN.md \
+            icon.png \
+            index.css \
+            index.js \
+            plugin.json \
+            preview.png
+
+          (
+            cd php-site
+            zip -r "../php-site-${VERSION}.zip" \
+              assets \
+              vendor \
+              config.example.php \
+              index.php
+          )
+
+      - name: Create release and upload assets
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ steps.validate.outputs.version }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          INPUT_LATEST: ${{ inputs.latest }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const version = process.env.VERSION;
+            const prerelease = String(process.env.INPUT_PRERELEASE).toLowerCase() === 'true';
+            const latest = String(process.env.INPUT_LATEST).toLowerCase() === 'true';
+            const { owner, repo } = context.repo;
+
+            const releasePayload = {
+              owner,
+              repo,
+              tag_name: version,
+              name: version,
+              body: '',
+              draft: false,
+              prerelease,
+            };
+
+            if (latest) {
+              releasePayload.make_latest = 'true';
+            } else if (!prerelease) {
+              releasePayload.make_latest = 'legacy';
+            }
+
+            const release = await github.rest.repos.createRelease(releasePayload);
+
+            const files = [
+              path.join(process.env.GITHUB_WORKSPACE, 'package.zip'),
+              path.join(process.env.GITHUB_WORKSPACE, `php-site-${version}.zip`),
+            ];
+
+            for (const filePath of files) {
+              const fileName = path.basename(filePath);
+              const data = fs.readFileSync(filePath);
+
+              await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: release.data.id,
+                name: fileName,
+                data,
+                headers: {
+                  'content-type': 'application/zip',
+                  'content-length': data.length,
+                },
+              });
+
+              core.info(`Uploaded ${fileName}`);
+            }
