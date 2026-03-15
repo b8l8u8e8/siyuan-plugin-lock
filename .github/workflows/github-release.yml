@@ -116,10 +116,8 @@ jobs:
           git tag "${VERSION}" "${GITHUB_SHA}"
           git push origin "refs/tags/${VERSION}"
 
-      - name: Build release archives
+      - name: Build release archive
         shell: bash
-        env:
-          VERSION: ${{ steps.validate.outputs.version }}
         run: |
           set -euo pipefail
 
@@ -136,13 +134,6 @@ jobs:
             preview.png
           )
 
-          PHP_SITE_ITEMS=(
-            assets
-            vendor
-            config.example.php
-            index.php
-          )
-
           for item in "${ROOT_ITEMS[@]}"; do
             if [ ! -e "${item}" ]; then
               echo "Missing required path: ${item}"
@@ -150,14 +141,7 @@ jobs:
             fi
           done
 
-          for item in "${PHP_SITE_ITEMS[@]}"; do
-            if [ ! -e "php-site/${item}" ]; then
-              echo "Missing required path: php-site/${item}"
-              exit 1
-            fi
-          done
-
-          rm -f package.zip "php-site-${VERSION}.zip"
+          rm -f package.zip
 
           zip -r package.zip \
             i18n \
@@ -170,15 +154,6 @@ jobs:
             index.js \
             plugin.json \
             preview.png
-
-          (
-            cd php-site
-            zip -r "../php-site-${VERSION}.zip" \
-              assets \
-              vendor \
-              config.example.php \
-              index.php
-          )
 
       - name: Create release and upload assets
         uses: actions/github-script@v7
@@ -215,26 +190,19 @@ jobs:
 
             const release = await github.rest.repos.createRelease(releasePayload);
 
-            const files = [
-              path.join(process.env.GITHUB_WORKSPACE, 'package.zip'),
-              path.join(process.env.GITHUB_WORKSPACE, `php-site-${version}.zip`),
-            ];
+            const filePath = path.join(process.env.GITHUB_WORKSPACE, 'package.zip');
+            const data = fs.readFileSync(filePath);
 
-            for (const filePath of files) {
-              const fileName = path.basename(filePath);
-              const data = fs.readFileSync(filePath);
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id: release.data.id,
+              name: 'package.zip',
+              data,
+              headers: {
+                'content-type': 'application/zip',
+                'content-length': data.length,
+              },
+            });
 
-              await github.rest.repos.uploadReleaseAsset({
-                owner,
-                repo,
-                release_id: release.data.id,
-                name: fileName,
-                data,
-                headers: {
-                  'content-type': 'application/zip',
-                  'content-length': data.length,
-                },
-              });
-
-              core.info(`Uploaded ${fileName}`);
-            }
+            core.info('Uploaded package.zip');
