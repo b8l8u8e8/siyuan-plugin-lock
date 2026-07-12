@@ -211,6 +211,38 @@
   background: var(--b3-theme-surface);
 }
 
+.ui-lock-guard__policy-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 12px 2px 32px;
+}
+
+.ui-lock-guard__duration-row {
+  display: grid;
+  grid-template-columns: auto minmax(72px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.ui-lock-guard__duration-row .b3-text-field {
+  width: 100%;
+  min-width: 0;
+}
+
+.ui-lock-guard__policy-options .ui-lock-guard__hint {
+  text-align: left;
+}
+
+.ui-lock-guard__trust-restart {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--b3-theme-on-surface);
+}
+
 .ui-lock-guard__common-select {
   display: flex;
   flex-direction: column;

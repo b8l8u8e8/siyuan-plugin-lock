@@ -1342,6 +1342,10 @@ class UiLockGuardPlugin extends Plugin {
     this.searchHideLockedEnabled = !!this.settings.searchHideLockedEnabled;
 
     this.normalizeLocks();
+    const clearedRestartTrust = this.clearRestartTrust();
+    if (clearedRestartTrust) {
+      await this.saveLocks();
+    }
     this.scheduleAllTrustTimers();
     this.scheduleAllTimerLocks();
     this.refreshDocTreeMarks();
@@ -1368,12 +1372,25 @@ class UiLockGuardPlugin extends Plugin {
         policy: lock.policy === "trust" ? "trust" : lock.policy === "timer" ? "timer" : "always",
         trustMinutes: clampInt(lock.trustMinutes, 1, 1440, 30),
         trustUntil: clampInt(lock.trustUntil, 0, Number.MAX_SAFE_INTEGER, 0),
+        trustLockOnRestart: lock.trustLockOnRestart === true,
         timerMinutes: clampInt(lock.timerMinutes, 1, 1440, DEFAULT_TIMER_MINUTES),
         timerElapsedMs: clampInt(lock.timerElapsedMs, 0, Number.MAX_SAFE_INTEGER, 0),
         createdAt: clampInt(lock.createdAt, 0, Number.MAX_SAFE_INTEGER, nowTs()),
         updatedAt: clampInt(lock.updatedAt, 0, Number.MAX_SAFE_INTEGER, nowTs()),
       }))
       .filter((lock) => isValidId(lock.id));
+  }
+
+  clearRestartTrust() {
+    let changed = false;
+    for (const lock of this.locks) {
+      if (lock.policy === "trust" && lock.trustLockOnRestart && lock.trustUntil) {
+        lock.trustUntil = 0;
+        lock.updatedAt = nowTs();
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   normalizeCommonSecrets(list) {
@@ -3226,16 +3243,28 @@ class UiLockGuardPlugin extends Plugin {
                 <input type="radio" name="ui-lock-guard-policy" value="trust" />
                 <span>${this.t("lock.policyTrust")}</span>
               </label>
-              <div data-trust-input style="display:none;">
-                <input class="b3-text-field fn__block" type="number" min="1" max="1440" step="1" value="30" />
+              <div class="ui-lock-guard__policy-options" data-trust-input style="display:none;">
+                <div class="ui-lock-guard__duration-row">
+                  <span>${this.t("lock.trustMinutesLabel")}</span>
+                  <input class="b3-text-field" type="number" min="1" max="1440" step="1" value="30" />
+                  <span>${this.t("lock.minutesUnit")}</span>
+                </div>
                 <div class="ui-lock-guard__hint">${this.t("lock.trustMinutesHint", {min: 30})}</div>
+                <label class="ui-lock-guard__trust-restart">
+                  <input type="checkbox" data-trust-lock-on-restart />
+                  <span>${this.t("lock.trustLockOnRestart")}</span>
+                </label>
               </div>
               <label class="ui-lock-guard__policy-item">
                 <input type="radio" name="ui-lock-guard-policy" value="timer" />
                 <span>${this.t("lock.policyTimer")}</span>
               </label>
-              <div data-timer-input style="display:none;">
-                <input class="b3-text-field fn__block" type="number" min="1" max="1440" step="1" value="${DEFAULT_TIMER_MINUTES}" />
+              <div class="ui-lock-guard__policy-options" data-timer-input style="display:none;">
+                <div class="ui-lock-guard__duration-row">
+                  <span>${this.t("lock.timerMinutesLabel")}</span>
+                  <input class="b3-text-field" type="number" min="1" max="1440" step="1" value="${DEFAULT_TIMER_MINUTES}" />
+                  <span>${this.t("lock.minutesUnit")}</span>
+                </div>
                 <div class="ui-lock-guard__hint">${this.t("lock.timerMinutesHint", {min: DEFAULT_TIMER_MINUTES})}</div>
               </div>
             </div>
@@ -3268,6 +3297,7 @@ class UiLockGuardPlugin extends Plugin {
     const policyInputs = Array.from(root.querySelectorAll("input[name='ui-lock-guard-policy']"));
     const trustInputWrap = root.querySelector("[data-trust-input]");
     const trustMinutesInput = trustInputWrap?.querySelector("input");
+    const trustLockOnRestartInput = trustInputWrap?.querySelector("[data-trust-lock-on-restart]");
     const trustHint = trustInputWrap?.querySelector(".ui-lock-guard__hint");
     const timerInputWrap = root.querySelector("[data-timer-input]");
     const timerMinutesInput = timerInputWrap?.querySelector("input");
@@ -3284,6 +3314,7 @@ class UiLockGuardPlugin extends Plugin {
       hint: "",
       policy: "always",
       trustMinutes: 30,
+      trustLockOnRestart: false,
       timerMinutes: DEFAULT_TIMER_MINUTES,
       commonSecretId: "",
     };
@@ -3478,6 +3509,7 @@ class UiLockGuardPlugin extends Plugin {
       const trustVal = clampInt(trustMinutesInput?.value, 1, 1440, 30);
       const timerVal = clampInt(timerMinutesInput?.value, 1, 1440, DEFAULT_TIMER_MINUTES);
       state.trustMinutes = trustVal;
+      state.trustLockOnRestart = !!trustLockOnRestartInput?.checked;
       state.timerMinutes = timerVal;
       state.hint = String(hintInput?.value || "").trim();
       if (!state.lockType || (!state.secret && !state.commonSecretId)) {
@@ -3507,6 +3539,7 @@ class UiLockGuardPlugin extends Plugin {
         hint: state.hint,
         policy,
         trustMinutes: trustVal,
+        trustLockOnRestart: state.trustLockOnRestart,
         timerMinutes: timerVal,
       });
       dialog.destroy();
@@ -3577,7 +3610,19 @@ class UiLockGuardPlugin extends Plugin {
     });
   }
 
-  async createLockRecord({id, type, title, lockType, secret, secretHash, hint, policy, trustMinutes, timerMinutes}) {
+  async createLockRecord({
+    id,
+    type,
+    title,
+    lockType,
+    secret,
+    secretHash,
+    hint,
+    policy,
+    trustMinutes,
+    trustLockOnRestart,
+    timerMinutes,
+  }) {
     let salt = secretHash?.salt || "";
     let hash = secretHash?.hash || "";
     if (!salt || !hash) {
@@ -3597,6 +3642,7 @@ class UiLockGuardPlugin extends Plugin {
       policy,
       trustMinutes: clampInt(trustMinutes, 1, 1440, 30),
       trustUntil: 0,
+      trustLockOnRestart: trustLockOnRestart === true,
       timerMinutes: clampInt(timerMinutes, 1, 1440, DEFAULT_TIMER_MINUTES),
       timerElapsedMs: 0,
       createdAt: now,
